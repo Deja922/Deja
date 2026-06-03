@@ -69,7 +69,9 @@ function numFmt(n: number): string { return n.toLocaleString(); }
 
 function tokenBar(val: number, max: number, w: number, color: string): string {
   const filled = Math.round((val / max) * w);
-  return color + "█".repeat(filled) + A.dim + "░".repeat(w - filled) + A.reset;
+  const pct = Math.round((val / max) * 100);
+  const bar = color + "=".repeat(filled) + A.dim + ".".repeat(w - filled) + A.reset;
+  return bar + A.dim + " " + String(pct).padStart(3) + "%" + A.reset;
 }
 
 function savingsBadge(base: number, opt: number): string {
@@ -82,8 +84,7 @@ function savingsBadge(base: number, opt: number): string {
 
 function sparkline(data: number[], upTo: number, color: string): string {
   const max = Math.max(...BASELINE_TOKENS);
-  const bars = ["_",".","-","=","~","#","$","@"];
-  // Use simple ASCII chars for sparkline to avoid width issues
+  const bars = ["_", ".", "-", "=", "+", "#", "@", "W"];
   return data.slice(0, upTo + 1).map(v => {
     const h = Math.max(0, Math.round((v / max) * (bars.length - 1)));
     return color + bars[h];
@@ -114,7 +115,7 @@ function renderFrame(round: number): void {
   const oQ     = OPTIMIZED_QUALITY[i];
   const isCkpt = CHECKPOINTS.has(round);
   const maxTok = 22000;
-  const barW   = 19;
+  const barW   = 14;  // 14 chars + " xx%" = 18 visible, fits in COLW=36
 
   const bTotal = BASELINE_TOKENS.slice(0,round).reduce((a,b)=>a+b,0);
   const oTotal = OPTIMIZED_TOKENS.slice(0,round).reduce((a,b)=>a+b,0);
