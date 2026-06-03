@@ -1,12 +1,16 @@
 # Deja
 
-**Stop paying for the same context twice.**
+Stop Claude Code from getting worse in long sessions.
 
-Context Engine is a TypeScript middleware that sits between your code and any LLM API. It compresses, deduplicates, and summarizes conversation history before each request — so your long coding sessions stay sharp instead of bloated.
+![demo](demo.gif)
 
-Tested on 20-round coding sessions with Claude Sonnet: **71.6% fewer prompt tokens, +0.8 quality improvement, 10/10 memory retention.**
+| | Baseline | Deja | Δ |
+|---|---|---|---|
+| Token usage (20 rounds) | 213,721 | 60,628 | **-71.6%** |
+| Response quality | 7.4 / 10 | 8.2 / 10 | **+0.8** |
+| Memory retention | 10 / 10 | 10 / 10 | **✓** |
 
-<!-- demo gif goes here — record with: npm run demo -->
+> Real Claude Sonnet API calls, 20-round coding session, no mocking. Full data in [`benchmarks/`](./benchmarks/).
 
 ---
 
@@ -20,10 +24,10 @@ This isn't a model limitation — it's a context problem. By round 20, your sess
 Round  1:    108 tokens sent
 Round  5:  4,568 tokens sent
 Round 10: 10,153 tokens sent
-Round 20: 21,220 tokens sent   ← you're paying for the entire session every time
+Round 20: 21,220 tokens sent   ← paying for the entire session every time
 ```
 
-Context Engine fixes this.
+Deja fixes this.
 
 ```
 Round  1:    108 tokens sent   (same)
@@ -34,29 +38,11 @@ Round 20:  5,578 tokens sent   (-74%)   ← stable, not growing
 
 ---
 
-## Benchmark
-
-20-round TypeScript coding session (architecture → refactor → bug fixes → deployment). Real Claude Sonnet API calls, no mocking.
-
-| Metric | Baseline | Context Engine | Δ |
-|---|---|---|---|
-| Total prompt tokens | 213,721 | 60,628 | **-71.6%** |
-| Final round tokens | 21,220 | 5,578 | **-73.7%** |
-| Avg response quality | 7.4 / 10 | 8.2 / 10 | **+0.8** |
-| Memory retention | 10 / 10 | 10 / 10 | 0 |
-| Reasoning stability | 8.7 / 10 | 8.4 / 10 | -0.3 |
-
-Quality goes *up* because compression removes noise and keeps the signal. The model gets a cleaner, more focused context.
-
-Memory retention stays perfect — decisions made in round 1 are still referenced correctly in round 20.
-
----
-
 ## Why This Is Different
 
 Most "prompt compression" tools just truncate old messages or summarize everything into a blob. That breaks reasoning chains and loses critical decisions.
 
-Context Engine runs a **5-stage pipeline** on every request:
+Deja runs a **5-stage pipeline** on every request:
 
 1. **Cleanup** — remove exact and near-duplicate messages (Jaccard similarity > 0.85)
 2. **Ranking** — score each message: recency (40%) + content density (30%) + role (20%) + uniqueness (10%)
@@ -72,30 +58,25 @@ The result: your context window contains the *right* history, not just the *rece
 
 - **Provider-agnostic** — Claude, OpenAI, or bring your own via `IProvider`
 - **No external dependencies for compression** — scoring and summarization run locally, no extra API calls
-- **Persistent memory** — 256-dim hash embeddings stored to `~/.context-engine/memory.json`, survives restarts
-- **Eval harness built-in** — run `npm run eval` or `npm run eval:long` to benchmark against your own workloads
-- **TypeScript-first** — strict types throughout, ESM, Node 20+
+- **Persistent memory** — 256-dim hash embeddings stored to `~/.deja/memory.json`, survives restarts
+- **Eval harness built-in** — `npm run eval` or `npm run eval:long` to benchmark your own workloads
+- **TypeScript-first** — strict types, ESM, Node 20+
 
 ---
 
 ## Run the Demo
 
-The repo ships with a 60-second terminal demo that replays the real benchmark data — no API calls required.
+The repo ships with a 60-second terminal demo that replays real benchmark data — no API calls required.
 
 ```bash
 npm run demo
 ```
 
-To record it as a GIF for GitHub / Twitter:
+To record it as a GIF:
 
 ```bash
-# Install tools (one-time)
 npm install -g @asciinema/cli agg
-
-# Record (~60 seconds)
 asciinema rec demo.cast --command "npx tsx src/cli/demo.ts"
-
-# Convert to GIF
 agg demo.cast demo.gif --theme monokai --font-size 14
 ```
 
@@ -104,8 +85,8 @@ agg demo.cast demo.gif --theme monokai --font-size 14
 ## Install
 
 ```bash
-git clone https://github.com/your-org/context-engine
-cd context-engine
+git clone https://github.com/Deja922/Deja
+cd Deja
 npm install
 ```
 
@@ -151,14 +132,6 @@ npm run eval -- --provider claude --mode both
 npm run eval:long -- --provider claude --rounds 20
 ```
 
-**Run one mode at a time:**
-
-```bash
-npm run eval:long -- --mode baseline --rounds 20
-# check your API dashboard, then:
-npm run eval:long -- --mode optimized --rounds 20
-```
-
 ---
 
 ## Use as a Library
@@ -170,13 +143,6 @@ import { ClaudeProvider } from './src/providers/claude.js'
 const pipeline = new Pipeline()
 const config = await loadConfig({ maxTokens: 8000, targetTokens: 3000 })
 
-// Your existing conversation context
-const context = {
-  messages: conversationHistory,
-  systemPrompt: 'You are a senior TypeScript engineer...'
-}
-
-// Compress before sending to the API
 const { context: compressed, stats } = await pipeline.run(context, config)
 
 console.log(`${stats.originalTokens} → ${stats.outputTokens} tokens`)
@@ -208,68 +174,59 @@ Your app
 LLM API  (Claude / OpenAI / local)
 ```
 
-The pipeline is pure TypeScript with no native dependencies. Compression uses extractive summarization — no extra LLM calls. Memory uses hash-based 256-dim embeddings stored locally as JSON.
+Pure TypeScript, no native dependencies. Compression runs locally — no extra LLM calls.
 
 ---
 
 ## Configuration
 
-```typescript
-// config/default.json
+```json
 {
-  "maxTokens": 8000,        // hard ceiling — never exceed this
-  "targetTokens": 3000,     // soft target after compression
-  "compressionRatio": 0.6,  // how aggressively to compress
-  "rankingThreshold": 0.3,  // drop messages below this score
+  "maxTokens": 8000,
+  "targetTokens": 3000,
+  "compressionRatio": 0.6,
+  "rankingThreshold": 0.3,
   "memoryEnabled": true,
-  "memoryTopK": 3           // inject top 3 relevant memories
+  "memoryTopK": 3
 }
 ```
 
-Lower `targetTokens` = more aggressive compression = more savings. The sweet spot for coding sessions is `3000–4000`.
+Sweet spot for most coding sessions: `targetTokens: 3000–4000`.
 
 ---
 
-## Eval Harness
+## Benchmarks
 
-Context Engine ships with a built-in evaluation system so you can measure impact on your own workloads.
+Full raw data in [`benchmarks/`](./benchmarks/).
 
-**5-task eval** (coding, planning, reasoning, summarization, agent workflow):
+**20-round long session (Claude Sonnet, real API):**
 
-```bash
-npm run eval -- --provider claude
-npm run eval -- --provider claude --judge   # Claude Haiku scores quality
-npm run eval -- --task coding reasoning     # run a subset
-```
-
-**20-round long-session eval:**
-
-```bash
-npm run eval:long -- --provider claude --rounds 20
-npm run eval:long -- --provider claude --rounds 20 --judge
-```
-
-Results auto-save to `~/.context-engine/eval-logs/` and `~/.context-engine/long-eval-logs/`.
+| Metric | Baseline | Deja | Δ |
+|---|---|---|---|
+| Total prompt tokens | 213,721 | 60,628 | **-71.6%** |
+| Final round tokens | 21,220 | 5,578 | **-73.7%** |
+| Avg response quality | 7.4 / 10 | 8.2 / 10 | **+0.8** |
+| Memory retention | 10 / 10 | 10 / 10 | 0 |
+| Reasoning stability | 8.7 / 10 | 8.4 / 10 | -0.3 |
 
 ---
 
 ## Roadmap
 
-- [ ] Streaming support — compress before first token, stream the rest
-- [ ] OpenAI text-embedding-3-small — upgrade from hash embeddings for better memory retrieval
-- [ ] Session replay — load a `.jsonl` conversation log and benchmark it
-- [ ] VS Code extension — integrate directly into Claude Code / Cursor workflows
-- [ ] SQLite memory backend — replace JSON file store for large memory sets
-- [ ] Ranking v2 — TF-IDF across session instead of per-message density
-- [ ] Cost tracking — report $ saved based on model pricing
+- [ ] Streaming support
+- [ ] OpenAI text-embedding-3-small for better memory retrieval
+- [ ] Session replay from `.jsonl` logs
+- [ ] VS Code / Cursor extension
+- [ ] SQLite memory backend
+- [ ] Cost tracking ($ saved per session)
 
 ---
 
 ## Tests
 
 ```bash
-npm test           # 28 unit tests
-npm run typecheck  # strict TypeScript check
+npm test
+npm run typecheck
 ```
 
 ---
