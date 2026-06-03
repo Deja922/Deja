@@ -16,7 +16,7 @@ Stop Claude Code from getting worse in long sessions.
 
 ## The Problem
 
-You open Claude Code (or Cursor, or Codex) and start a session. Hour two, something shifts. The model starts forgetting decisions from earlier. It contradicts itself. Responses get slower and more expensive.
+You open Claude Code (or any long AI coding session) and start building. Hour two, something shifts. The model starts forgetting decisions from earlier. It contradicts itself. Responses get slower and more expensive.
 
 This isn't a model limitation — it's a context problem. By round 20, your session is sending 21,000+ tokens of conversation history on every single request. Most of it is redundant.
 
