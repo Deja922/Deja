@@ -84,10 +84,19 @@ agg demo.cast demo.gif --theme monokai --font-size 14
 
 ## Install
 
+**Option 1 — npm (recommended):**
+
+```bash
+npm install -g deja-context
+```
+
+**Option 2 — from source:**
+
 ```bash
 git clone https://github.com/Deja922/Deja
 cd Deja
 npm install
+npm run build
 ```
 
 Set your API key:

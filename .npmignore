@@ -1,0 +1,12 @@
+agg.exe
+ttyd.exe
+demo.cast
+demo.tape
+test.tape
+PROFILE_README.md
+scripts/
+tests/
+benchmarks/
+examples/
+*.png
+*.cast
