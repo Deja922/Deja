@@ -16,6 +16,6 @@ Thumbs.db
 .idea/
 *.swp
 
-# Demo recordings
+# Demo recordings — keep the output GIF, ignore the raw cast
+demo.cast
 *.cast
-demo.gif
