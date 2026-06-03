@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.js.map
+.env
+.env.local
+
+# Eval logs (contain API responses, can be large)
+~/.context-engine/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Demo recordings
+*.cast
+demo.gif

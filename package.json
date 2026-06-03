@@ -1,0 +1,33 @@
+{
+  "name": "deja",
+  "version": "0.1.0",
+  "description": "Stop AI coding sessions from bloating — compress, deduplicate, and stabilize LLM context",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "ctx": "./src/cli/index.ts",
+    "ai-context": "./src/cli/ai-context.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "eval": "tsx src/cli/eval.ts",
+    "eval:long": "tsx src/cli/long-eval.ts",
+    "demo": "tsx src/cli/demo.ts"
+  },
+  "dependencies": {
+    "openai": "^4.47.1",
+    "@anthropic-ai/sdk": "^0.24.3",
+    "commander": "^12.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5",
+    "tsx": "^4.15.7",
+    "vitest": "^1.6.0"
+  }
+}

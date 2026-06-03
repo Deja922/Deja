@@ -1,0 +1,15 @@
+{
+  "messages": [
+    { "id": "1", "role": "system", "content": "You are a senior TypeScript engineer.", "timestamp": 1000 },
+    { "id": "2", "role": "user", "content": "How do I use generics in TypeScript?", "timestamp": 2000 },
+    { "id": "3", "role": "assistant", "content": "Generics allow you to write reusable, type-safe code. For example: function identity<T>(arg: T): T { return arg; }", "timestamp": 3000 },
+    { "id": "4", "role": "user", "content": "How do I use generics in TypeScript?", "timestamp": 4000 },
+    { "id": "5", "role": "assistant", "content": "As I mentioned, generics let you write reusable, type-safe code.", "timestamp": 5000 },
+    { "id": "6", "role": "user", "content": "Can you show me an example with interfaces?\n```ts\ninterface Box<T> { value: T }\n```", "timestamp": 6000 },
+    { "id": "7", "role": "assistant", "content": "Sure! Here is an interface with generics:\n```ts\ninterface Box<T> {\n  value: T;\n}\nconst box: Box<string> = { value: 'hello' };\n```\nThis works for any type T.", "timestamp": 7000 },
+    { "id": "8", "role": "user", "content": "What about constraints?", "timestamp": 8000 },
+    { "id": "9", "role": "assistant", "content": "You can constrain generics with extends:\n```ts\nfunction getLength<T extends { length: number }>(arg: T): number {\n  return arg.length;\n}\n```", "timestamp": 9000 },
+    { "id": "10", "role": "user", "content": "Thanks! One more thing — what are conditional types?", "timestamp": 10000 }
+  ],
+  "systemPrompt": "You are a senior TypeScript engineer."
+}

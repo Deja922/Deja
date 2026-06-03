@@ -1,0 +1,23 @@
+{
+  "systemPrompt": "You are a senior TypeScript engineer helping a developer build a production API.",
+  "messages": [
+    { "id": "1",  "role": "user",      "content": "I'm building a REST API in TypeScript. Where should I start?", "timestamp": 1000 },
+    { "id": "2",  "role": "assistant", "content": "Start with a clear project structure. Use Express or Fastify, add TypeScript strict mode, and set up a proper tsconfig. I recommend: src/routes, src/controllers, src/services, src/models, src/middleware.", "timestamp": 2000 },
+    { "id": "3",  "role": "user",      "content": "Which framework — Express or Fastify?", "timestamp": 3000 },
+    { "id": "4",  "role": "assistant", "content": "Fastify is faster and has built-in schema validation with JSON Schema. Express has a larger ecosystem. For a new production API I'd pick Fastify.", "timestamp": 4000 },
+    { "id": "5",  "role": "user",      "content": "Which framework — Express or Fastify?", "timestamp": 5000 },
+    { "id": "6",  "role": "assistant", "content": "As I mentioned, Fastify is generally the better choice for new production APIs due to performance and built-in validation.", "timestamp": 6000 },
+    { "id": "7",  "role": "user",      "content": "How do I handle database connections in TypeScript?", "timestamp": 7000 },
+    { "id": "8",  "role": "assistant", "content": "Use a connection pool. For PostgreSQL, use `pg` or Prisma. Keep the pool instance as a singleton. Example:\n```ts\nimport { Pool } from 'pg';\nconst pool = new Pool({ connectionString: process.env.DATABASE_URL });\nexport default pool;\n```", "timestamp": 8000 },
+    { "id": "9",  "role": "user",      "content": "What about error handling middleware?", "timestamp": 9000 },
+    { "id": "10", "role": "assistant", "content": "Create a centralized error handler. In Express:\n```ts\napp.use((err: Error, req: Request, res: Response, next: NextFunction) => {\n  console.error(err.stack);\n  res.status(500).json({ error: err.message });\n});\n```\nAlways put it last.", "timestamp": 10000 },
+    { "id": "11", "role": "user",      "content": "How do I validate request bodies?", "timestamp": 11000 },
+    { "id": "12", "role": "assistant", "content": "Use Zod for runtime validation:\n```ts\nconst schema = z.object({ name: z.string(), age: z.number().min(0) });\nconst body = schema.parse(req.body);\n```\nIt integrates well with TypeScript types.", "timestamp": 12000 },
+    { "id": "13", "role": "user",      "content": "What about authentication — JWT or sessions?", "timestamp": 13000 },
+    { "id": "14", "role": "assistant", "content": "JWT for stateless APIs (mobile, microservices). Sessions for monoliths where you control the client. Use `jsonwebtoken` + `jose` for JWT, `express-session` + Redis for sessions.", "timestamp": 14000 },
+    { "id": "15", "role": "user",      "content": "How do I structure my Zod schemas?", "timestamp": 15000 },
+    { "id": "16", "role": "assistant", "content": "Keep schemas co-located with their route or in a `src/schemas` folder. Export both the schema and the inferred type:\n```ts\nexport const UserSchema = z.object({ id: z.string().uuid(), email: z.string().email() });\nexport type User = z.infer<typeof UserSchema>;\n```", "timestamp": 16000 },
+    { "id": "17", "role": "user",      "content": "How do I add rate limiting?", "timestamp": 17000 },
+    { "id": "18", "role": "assistant", "content": "Use `express-rate-limit` for Express:\n```ts\nconst limiter = rateLimit({ windowMs: 15*60*1000, max: 100 });\napp.use(limiter);\n```\nFor Fastify, use `@fastify/rate-limit`.", "timestamp": 18000 }
+  ]
+}
