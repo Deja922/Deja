@@ -1,33 +1,28 @@
 #!/usr/bin/env node
-/**
- * Context Engine — 60-second terminal demo
- *
- * Uses real benchmark data from our 20-round eval run.
- * Record with: npx asciinema rec demo.cast --command "npx tsx src/cli/demo.ts"
- * Convert to GIF: npx agg demo.cast demo.gif --theme monokai
- */
+// Deja — 60-second terminal demo
+// Real benchmark data from 20-round Claude Sonnet API session.
 
-// ── Real benchmark data (from actual Claude Sonnet API runs) ──────────────
-const BASELINE_TOKENS =  [108, 1208, 2340, 3447, 4568, 5688, 6820, 7929, 9037, 10153, 11251, 12345, 13474, 14591, 15692, 16805, 17913, 19008, 20124, 21220];
-const OPTIMIZED_TOKENS = [108, 1208, 2340, 2288, 1239, 1251, 2301, 2290, 2358,  2342,  3370,  3357,  3446,  3448,  4490,  4510,  4577,  4544,  5583,  5578];
-const BASELINE_QUALITY =  [8.2, 7.1, 7.1, 7.7, 7.3, 6.4, 8.2, 8.2, 7.3, 6.0, 7.3, 7.7, 7.3, 7.7, 7.3, 6.0, 7.7, 8.2, 6.9, 8.2];
-const OPTIMIZED_QUALITY = [7.7, 8.9, 9.4, 9.4, 8.5, 6.4, 8.2, 8.4, 7.7, 7.3, 8.2, 7.7, 7.7, 7.7, 8.2, 9.4, 8.2, 8.2, 7.3, 9.4];
+// ── Data ─────────────────────────────────────────────────────────────────────
+const BASELINE_TOKENS  = [108,1208,2340,3447,4568,5688,6820,7929,9037,10153,11251,12345,13474,14591,15692,16805,17913,19008,20124,21220];
+const OPTIMIZED_TOKENS = [108,1208,2340,2288,1239,1251,2301,2290,2358, 2342, 3370, 3357, 3446, 3448, 4490, 4510, 4577, 4544, 5583, 5578];
+const BASELINE_QUALITY  = [8.2,7.1,7.1,7.7,7.3,6.4,8.2,8.2,7.3,6.0,7.3,7.7,7.3,7.7,7.3,6.0,7.7,8.2,6.9,8.2];
+const OPTIMIZED_QUALITY = [7.7,8.9,9.4,9.4,8.5,6.4,8.2,8.4,7.7,7.3,8.2,7.7,7.7,7.7,8.2,9.4,8.2,8.2,7.3,9.4];
 const TOPICS = [
   "architecture","architecture","refactor","bug fixing","memory system",
   "provider router","refactor","bug fixing","cli optimization","testing",
   "deployment","architecture","refactor","bug fixing","provider router",
   "testing","cli optimization","deployment","refactor","deployment",
 ];
-const MEMORY_CHECKPOINTS = new Set([8, 12, 16, 20]);
+const CHECKPOINTS = new Set([8,12,16,20]);
 
+// ── Timing (total ≈ 60s) ──────────────────────────────────────────────────────
+const INTRO_MS   = 5000;
+const ROUND_MS   = 2500;   // 20 rounds × 2500 = 50 000 ms
+const OUTRO_MS   = 5000;
 const TOTAL_ROUNDS = 20;
-const ROUND_DELAY_MS = 1800;
-const INTRO_MS = 2200;
-const OUTRO_MS = 3000;
 
-// ── ANSI helpers ──────────────────────────────────────────────────────────
-
-const C = {
+// ── ANSI ──────────────────────────────────────────────────────────────────────
+const A = {
   reset:  "\x1b[0m",
   bold:   "\x1b[1m",
   dim:    "\x1b[2m",
@@ -35,185 +30,201 @@ const C = {
   green:  "\x1b[32m",
   yellow: "\x1b[33m",
   cyan:   "\x1b[36m",
-  white:  "\x1b[97m",
-  bgRed:  "\x1b[41m",
-  bgGreen:"\x1b[42m",
   clear:  "\x1b[2J\x1b[H",
   hide:   "\x1b[?25l",
   show:   "\x1b[?25h",
 };
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+// Strip ANSI codes to measure real visible length
+function vlen(s: string): number {
+  return s.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
-function fmt(n: number): string {
-  return n.toLocaleString();
+// Pad a string (which may contain ANSI codes) to a given visible width
+function pad(s: string, w: number, align: "l"|"r" = "l"): string {
+  const v = vlen(s);
+  const spaces = " ".repeat(Math.max(0, w - v));
+  return align === "r" ? spaces + s : s + spaces;
 }
 
-function bar(val: number, max: number, width: number, color: string): string {
-  const filled = Math.round((val / max) * width);
-  return color + "█".repeat(filled) + C.dim + "░".repeat(width - filled) + C.reset;
+// ── Box geometry ──────────────────────────────────────────────────────────────
+const COLW = 37;  // visible chars per column (excluding borders and padding)
+// Row layout: │ [COLW] │ [COLW] │  → total visible = COLW*2 + 6 + 1 = COLW*2+7
+// With COLW=37: 37*2+7 = 81 chars wide
+
+function boxRow(left: string, right: string): string {
+  return `  │ ${pad(left, COLW)} │ ${pad(right, COLW)} │`;
 }
 
-function pct(base: number, opt: number): string {
+function spanRow(content: string): string {
+  // Full-width row spanning both columns: │ [COLW*2+3] │
+  return `  │ ${pad(content, COLW * 2 + 3)} │`;
+}
+
+const BOX_TOP = `  ┌${"─".repeat(COLW+2)}┬${"─".repeat(COLW+2)}┐`;
+const BOX_MID = `  ├${"─".repeat(COLW+2)}┼${"─".repeat(COLW+2)}┤`;
+const BOX_DIV = `  ├${"─".repeat(COLW+2)}┴${"─".repeat(COLW+2)}┤`;  // merge cols
+const BOX_BOT = `  └${"─".repeat(COLW*2+5)}┘`;
+const BOX_SEP = `  │ ${" ".repeat(COLW)} │ ${" ".repeat(COLW)} │`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function numFmt(n: number): string { return n.toLocaleString(); }
+
+function tokenBar(val: number, max: number, w: number, color: string): string {
+  const filled = Math.round((val / max) * w);
+  return color + "█".repeat(filled) + A.dim + "░".repeat(w - filled) + A.reset;
+}
+
+function savingsBadge(base: number, opt: number): string {
+  if (base === opt) return A.dim + "      —" + A.reset;
   const p = ((base - opt) / base) * 100;
-  return p > 0 ? `${C.green}-${p.toFixed(1)}%${C.reset}` : `${C.red}+${Math.abs(p).toFixed(1)}%${C.reset}`;
+  return p > 0
+    ? A.bold + A.green + `-${p.toFixed(1)}%` + A.reset
+    : A.red   + `+${Math.abs(p).toFixed(1)}%` + A.reset;
 }
 
-// ── Mini token growth sparkline ───────────────────────────────────────────
-
-function sparkline(values: number[], current: number, width: number, color: string): string {
-  const slice = values.slice(0, current + 1);
+function sparkline(data: number[], upTo: number, color: string): string {
   const max = Math.max(...BASELINE_TOKENS);
-  return slice.map((v) => {
-    const h = Math.max(1, Math.round((v / max) * 4));
-    const chars = ["▁","▂","▃","▄","▅","▆","▇","█"];
-    return color + chars[Math.min(h, chars.length - 1)];
-  }).join("") + C.reset;
+  const bars = ["▁","▂","▃","▄","▅","▆","▇","█"];
+  return data.slice(0, upTo + 1).map(v => {
+    const h = Math.max(0, Math.round((v / max) * (bars.length - 1)));
+    return color + bars[h];
+  }).join("") + A.reset;
 }
 
-// ── Main frame renderer ───────────────────────────────────────────────────
+// ── Screens ───────────────────────────────────────────────────────────────────
+
+function renderIntro(): void {
+  process.stdout.write(A.clear);
+  console.log(`\n`);
+  console.log(`  ${A.bold}${A.cyan}Deja${A.reset}  ${A.dim}— context compression for AI coding sessions${A.reset}\n`);
+  console.log(`  ${A.dim}What happens after 20 rounds in Claude Code / Cursor?${A.reset}\n`);
+  console.log(`  ${A.red}Without Deja:${A.reset}  round 1 →  ${A.bold}108${A.reset} tokens   round 20 → ${A.bold}${A.red}21,220${A.reset} tokens`);
+  console.log(`  ${A.green}With Deja:   ${A.reset}  round 1 →  ${A.bold}108${A.reset} tokens   round 20 → ${A.bold}${A.green} 5,578${A.reset} tokens\n`);
+  console.log(`  ${A.dim}Running live comparison — 20 rounds...${A.reset}\n`);
+}
 
 function renderFrame(round: number): void {
-  const i = round - 1;
-  const bTok = BASELINE_TOKENS[i];
-  const oTok = OPTIMIZED_TOKENS[i];
-  const bQ = BASELINE_QUALITY[i];
-  const oQ = OPTIMIZED_QUALITY[i];
-  const maxTok = 22000;
-  const barW = 22;
-  const isCheckpoint = MEMORY_CHECKPOINTS.has(round);
+  const i        = round - 1;
+  const bTok     = BASELINE_TOKENS[i];
+  const oTok     = OPTIMIZED_TOKENS[i];
+  const bQ       = BASELINE_QUALITY[i];
+  const oQ       = OPTIMIZED_QUALITY[i];
+  const isCkpt   = CHECKPOINTS.has(round);
+  const maxTok   = 22000;
+  const barW     = 20;
 
-  const W = 72;
-  const divider = "│";
-  const sep = "─".repeat(W);
+  const bTotal   = BASELINE_TOKENS.slice(0,round).reduce((a,b)=>a+b,0);
+  const oTotal   = OPTIMIZED_TOKENS.slice(0,round).reduce((a,b)=>a+b,0);
+  const saved    = bTotal - oTotal;
+  const savedPct = bTotal > 0 ? ((saved/bTotal)*100).toFixed(1) : "0.0";
 
-  const line = (left: string, right: string, leftW = 34) => {
-    const lPlain = left.replace(/\x1b\[[0-9;]*m/g, "");
-    const lPad = Math.max(0, leftW - lPlain.length);
-    return `${divider} ${left}${" ".repeat(lPad)} ${divider} ${right}`;
-  };
+  process.stdout.write(A.clear);
 
-  process.stdout.write(C.clear);
+  // Header
+  console.log(`  ${A.bold}${A.cyan}Deja${A.reset}${A.dim} — Live Session Comparison${A.reset}`);
+  console.log(BOX_TOP);
+  console.log(boxRow(
+    `${A.bold}${A.red} ✗  WITHOUT Deja${A.reset}`,
+    `${A.bold}${A.green} ✓  WITH Deja${A.reset}`,
+  ));
+  console.log(BOX_MID);
 
-  // Title
-  console.log(`${C.bold}${C.cyan}  Context Engine${C.reset}${C.dim} — Live Session Comparison${C.reset}`);
-  console.log(`  ${C.dim}${sep}${C.reset}`);
-  console.log(`  ${divider} ${C.bold}${C.red} WITHOUT Context Engine${C.reset}         ${divider} ${C.bold}${C.green} WITH Context Engine${C.reset}`);
-  console.log(`  ├${"─".repeat(35)}┼${"─".repeat(35)}┤`);
+  // Round + topic
+  const ckptTag = isCkpt ? `  ${A.yellow}★ checkpoint${A.reset}` : "";
+  console.log(boxRow(
+    `${A.dim}Round ${A.reset}${A.bold}${round}${A.reset}${A.dim} / ${TOTAL_ROUNDS}${A.reset}${ckptTag}`,
+    `${A.dim}Round ${A.reset}${A.bold}${round}${A.reset}${A.dim} / ${TOTAL_ROUNDS}${A.reset}${ckptTag}`,
+  ));
+  console.log(boxRow(
+    `${A.dim}Topic: ${A.reset}${TOPICS[i]}`,
+    `${A.dim}Topic: ${A.reset}${TOPICS[i]}`,
+  ));
+  console.log(BOX_SEP);
 
-  // Round
-  const roundLabel = `Round ${round} / ${TOTAL_ROUNDS}` + (isCheckpoint ? ` ${C.yellow}★ memory checkpoint${C.reset}` : "");
-  console.log(`  ${line(`${C.dim}Round ${round} / ${TOTAL_ROUNDS}${isCheckpoint ? ` ${C.yellow}★${C.reset}` : ""}${C.reset}`, `${C.dim}Round ${round} / ${TOTAL_ROUNDS}${isCheckpoint ? ` ${C.yellow}★${C.reset}` : ""}${C.reset}`)}`);
-  console.log(`  ${line(`${C.dim}Topic: ${TOPICS[i].padEnd(20)}${C.reset}`, `${C.dim}Topic: ${TOPICS[i].padEnd(20)}${C.reset}`)}`);
-  console.log(`  ${divider}${" ".repeat(36)}${divider}${" ".repeat(36)}`);
-
-  // Tokens
-  const tokDiff = pct(bTok, oTok);
-  console.log(`  ${line(
-    `${C.bold}${C.red}${fmt(bTok).padStart(8)} tokens${C.reset}`,
-    `${C.bold}${C.green}${fmt(oTok).padStart(8)} tokens${C.reset}  ${tokDiff}`
-  )}`);
+  // Token counts
+  const badge = savingsBadge(bTok, oTok);
+  console.log(boxRow(
+    `${A.bold}${A.red}${pad(numFmt(bTok), 8, "r")} tokens${A.reset}`,
+    `${A.bold}${A.green}${pad(numFmt(oTok), 8, "r")} tokens${A.reset}  ${badge}`,
+  ));
+  console.log(BOX_SEP);
 
   // Bars
-  console.log(`  ${line(
-    bar(bTok, maxTok, barW, C.red),
-    bar(oTok, maxTok, barW, C.green)
-  )}`);
-  console.log(`  ${divider}${" ".repeat(36)}${divider}${" ".repeat(36)}`);
+  console.log(boxRow(
+    tokenBar(bTok, maxTok, barW, A.red),
+    tokenBar(oTok, maxTok, barW, A.green),
+  ));
+  console.log(BOX_SEP);
 
   // Quality
-  const qColor = oQ >= bQ ? C.green : C.yellow;
-  console.log(`  ${line(
-    `${C.dim}Quality ${C.reset}${C.bold}${bQ.toFixed(1)}${C.reset}${C.dim} / 10${C.reset}`,
-    `${C.dim}Quality ${C.reset}${C.bold}${qColor}${oQ.toFixed(1)}${C.reset}${C.dim} / 10${C.reset}`
-  )}`);
-  console.log(`  ├${"─".repeat(35)}┴${"─".repeat(35)}┤`);
+  const qColor = oQ >= bQ ? A.green : A.yellow;
+  console.log(boxRow(
+    `${A.dim}Quality  ${A.reset}${A.bold}${bQ.toFixed(1)}${A.reset}${A.dim} / 10${A.reset}`,
+    `${A.dim}Quality  ${A.reset}${A.bold}${qColor}${oQ.toFixed(1)}${A.reset}${A.dim} / 10${A.reset}`,
+  ));
 
-  // Growth curve
-  const bSpark = sparkline(BASELINE_TOKENS, i, TOTAL_ROUNDS, C.red);
-  const oSpark = sparkline(OPTIMIZED_TOKENS, i, TOTAL_ROUNDS, C.green);
-  console.log(`  ${divider} ${C.dim}Token growth:${C.reset}`);
-  console.log(`  ${divider}  ${C.red}baseline ${C.reset} ${bSpark}`);
-  console.log(`  ${divider}  ${C.green}optimized${C.reset} ${oSpark}`);
-  console.log(`  └${"─".repeat(71)}`);
+  // Growth curve section (spans full width)
+  console.log(BOX_DIV);
+  console.log(spanRow(`${A.dim}Token growth (${round} rounds):${A.reset}`));
+  console.log(spanRow(`  ${A.red}baseline ${A.reset} ${sparkline(BASELINE_TOKENS,  i, A.red)}`));
+  console.log(spanRow(`  ${A.green}optimized${A.reset} ${sparkline(OPTIMIZED_TOKENS, i, A.green)}`));
+  console.log(BOX_BOT);
 
-  // Running totals
-  const bTotal = BASELINE_TOKENS.slice(0, round).reduce((a, b) => a + b, 0);
-  const oTotal = OPTIMIZED_TOKENS.slice(0, round).reduce((a, b) => a + b, 0);
-  const savedSoFar = bTotal - oTotal;
-  const savedPct = ((savedSoFar / bTotal) * 100).toFixed(1);
-
-  if (savedSoFar > 0) {
-    console.log(`\n  ${C.dim}Cumulative:${C.reset}  ${C.red}${fmt(bTotal)}${C.reset} baseline  vs  ${C.green}${fmt(oTotal)}${C.reset} optimized  →  ${C.bold}${C.green}${fmt(savedSoFar)} tokens saved (${savedPct}%)${C.reset}`);
+  // Cumulative summary below box
+  if (saved > 0) {
+    console.log(`\n  ${A.dim}Cumulative: ${A.reset}${A.red}${numFmt(bTotal)}${A.reset} baseline  vs  ${A.green}${numFmt(oTotal)}${A.reset} optimized  →  ${A.bold}${A.green}${numFmt(saved)} tokens saved (${savedPct}%)${A.reset}`);
   } else {
-    console.log(`\n  ${C.dim}Sessions identical so far — compression kicks in as history grows...${C.reset}`);
+    console.log(`\n  ${A.dim}Sessions identical — compression kicks in as history grows...${A.reset}`);
   }
 }
 
-// ── Final benchmark screen ────────────────────────────────────────────────
-
 function renderFinal(): void {
-  process.stdout.write(C.clear);
+  process.stdout.write(A.clear);
 
-  console.log(`\n  ${C.bold}${C.cyan}Context Engine${C.reset}  ${C.dim}— 20-round benchmark results${C.reset}\n`);
+  console.log(`\n  ${A.bold}${A.cyan}Deja${A.reset}  ${A.dim}— 20-round benchmark  (real Claude Sonnet API)${A.reset}\n`);
 
-  const rows: [string, string, string, string][] = [
-    ["Total prompt tokens", "213,721", "60,628",  "-71.6%"],
-    ["Final round tokens",  " 21,220", " 5,578",  "-73.7%"],
-    ["Avg response quality","    7.4", "   8.2",  "  +0.8"],
-    ["Memory retention",    "  10/10", " 10/10",  "    ✓ "],
-  ];
+  // Table geometry
+  const W = { m: 26, b: 11, o: 11, d: 9 };
+  const top = `  ┌${"─".repeat(W.m+2)}┬${"─".repeat(W.b+2)}┬${"─".repeat(W.o+2)}┬${"─".repeat(W.d+2)}┐`;
+  const mid = `  ├${"─".repeat(W.m+2)}┼${"─".repeat(W.b+2)}┼${"─".repeat(W.o+2)}┼${"─".repeat(W.d+2)}┤`;
+  const bot = `  └${"─".repeat(W.m+2)}┴${"─".repeat(W.b+2)}┴${"─".repeat(W.o+2)}┴${"─".repeat(W.d+2)}┘`;
 
-  const W = { metric: 24, val: 10, delta: 8 };
-  const top = `  ┌${"─".repeat(W.metric+2)}┬${"─".repeat(W.val+2)}┬${"─".repeat(W.val+2)}┬${"─".repeat(W.delta+2)}┐`;
-  const mid = `  ├${"─".repeat(W.metric+2)}┼${"─".repeat(W.val+2)}┼${"─".repeat(W.val+2)}┼${"─".repeat(W.delta+2)}┤`;
-  const bot = `  └${"─".repeat(W.metric+2)}┴${"─".repeat(W.val+2)}┴${"─".repeat(W.val+2)}┴${"─".repeat(W.delta+2)}┘`;
-
-  const row = (m: string, b: string, o: string, d: string, highlight = false) => {
-    const dc = highlight ? C.bold + C.green : C.green;
-    return `  │ ${m.padEnd(W.metric)} │ ${C.red}${b.padStart(W.val)}${C.reset} │ ${C.green}${o.padStart(W.val)}${C.reset} │ ${dc}${d.padStart(W.delta)}${C.reset} │`;
+  const row = (m: string, b: string, o: string, d: string, hi = false) => {
+    const dc = hi ? A.bold + A.green : A.green;
+    return `  │ ${pad(m,W.m)} │ ${A.red}${pad(b,W.b,"r")}${A.reset} │ ${A.green}${pad(o,W.o,"r")}${A.reset} │ ${dc}${pad(d,W.d,"r")}${A.reset} │`;
   };
 
   console.log(top);
-  console.log(`  │ ${"Metric".padEnd(W.metric)} │ ${"Baseline".padStart(W.val)} │ ${"Optimized".padStart(W.val)} │ ${"Δ".padStart(W.delta)} │`);
+  console.log(`  │ ${pad("Metric",W.m)} │ ${pad("Baseline",W.b,"r")} │ ${pad("Deja",W.o,"r")} │ ${pad("Δ",W.d,"r")} │`);
   console.log(mid);
-  for (const [m, b, o, d] of rows) {
-    console.log(row(m, b, o, d, m.includes("Total")));
-  }
+  console.log(row("Total prompt tokens",  "213,721", "60,628",  "-71.6%", true));
+  console.log(row("Final round tokens",   " 21,220", " 5,578",  "-73.7%", true));
+  console.log(row("Avg response quality", "  7.4/10", " 8.2/10", "  +0.8"));
+  console.log(row("Memory retention",     "  10/10",  " 10/10",  "    ✓ "));
   console.log(bot);
 
-  console.log(`\n  ${C.bold}${C.green}71.6% fewer tokens. Better quality. Zero memory loss.${C.reset}`);
-  console.log(`\n  ${C.dim}github.com/your-org/context-engine${C.reset}\n`);
+  console.log(`\n  ${A.bold}${A.green}71.6% fewer tokens. Better quality. Zero memory loss.${A.reset}`);
+  console.log(`\n  ${A.dim}github.com/Deja922/Deja${A.reset}\n`);
 }
 
-// ── Run ───────────────────────────────────────────────────────────────────
-
+// ── Run ───────────────────────────────────────────────────────────────────────
 (async () => {
-  process.stdout.write(C.hide);
-
+  process.stdout.write(A.hide);
   try {
-    // Intro screen
-    process.stdout.write(C.clear);
-    console.log(`\n\n  ${C.bold}${C.cyan}Context Engine${C.reset}\n`);
-    console.log(`  ${C.dim}What happens to your Claude Code session after 20 rounds?${C.reset}\n`);
-    console.log(`  ${C.red}Without:${C.reset}  tokens grow  108  →  21,220  every request`);
-    console.log(`  ${C.green}With:    ${C.reset}  tokens stay  108  →   5,578  — compressed\n`);
-    console.log(`  ${C.dim}Starting live comparison...${C.reset}`);
+    renderIntro();
     await sleep(INTRO_MS);
 
-    // Round-by-round animation
-    for (let round = 1; round <= TOTAL_ROUNDS; round++) {
-      renderFrame(round);
-      await sleep(ROUND_DELAY_MS);
+    for (let r = 1; r <= TOTAL_ROUNDS; r++) {
+      renderFrame(r);
+      await sleep(ROUND_MS);
     }
 
-    // Final benchmark
     renderFinal();
     await sleep(OUTRO_MS);
-
   } finally {
-    process.stdout.write(C.show);
+    process.stdout.write(A.show);
   }
 })();
