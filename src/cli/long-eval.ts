@@ -18,6 +18,7 @@ program
   .option("--max-tokens <n>", "Max tokens for pipeline", "8000")
   .option("--target-tokens <n>", "Target tokens after compression", "3000")
   .option("--rounds <n>", "Number of rounds to run (max 20, default 20)", "20")
+  .option("--workflow <name>", "Workflow: coding | planning | agent", "coding")
   .option("--judge", "Use Claude Haiku to judge output quality", false)
   .option("-o, --output <path>", "Save full report as JSON")
   .option("-v, --verbose", "Print each round's response snippet", false)
@@ -30,6 +31,7 @@ const raw = program.opts<{
   maxTokens: string;
   targetTokens: string;
   rounds: string;
+  workflow: string;
   judge: boolean;
   output?: string;
   verbose: boolean;
@@ -42,8 +44,9 @@ const opts: LongEvalOptions = {
   maxTokens: parseInt(raw.maxTokens, 10),
   targetTokens: parseInt(raw.targetTokens, 10),
   numRounds: Math.min(20, Math.max(1, parseInt(raw.rounds, 10))),
+  workflow: (["coding", "planning", "agent"].includes(raw.workflow) ? raw.workflow : "coding") as "coding" | "planning" | "agent",
   judgeEnabled: raw.judge,
-  outputFile: raw.output,
+  ...(raw.output !== undefined ? { outputFile: raw.output } : {}),
   verbose: raw.verbose,
 };
 

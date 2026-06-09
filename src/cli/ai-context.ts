@@ -36,7 +36,7 @@ program
 
     await runProxy(prompt, {
       mode,
-      contextFile: opts.context,
+      ...(opts.context !== undefined ? { contextFile: opts.context } : {}),
       maxTokens: parseInt(opts.maxTokens),
       targetTokens: parseInt(opts.targetTokens),
       memoryEnabled: opts.memory,

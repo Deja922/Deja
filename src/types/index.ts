@@ -4,6 +4,16 @@
 
 export type Role = "user" | "assistant" | "system";
 
+/**
+ * Message category — determines which pipeline stages process this message.
+ *
+ *   SYSTEM_LOGS  → dev-only (stderr / debug file), NEVER reaches LLM
+ *   TELEMETRY    → dev-only (stderr / debug file), NEVER reaches LLM
+ *   USER_MEMORY  → LLM-bound, eligible for compression
+ *   TASK_MEMORY  → LLM-bound, eligible for compression
+ */
+export type MessageCategory = "SYSTEM_LOGS" | "TELEMETRY" | "USER_MEMORY" | "TASK_MEMORY";
+
 export interface Message {
   id: string;
   role: Role;
@@ -13,12 +23,27 @@ export interface Message {
   importance?: number;      // 0–1, filled by ranker
   summary?: string;         // filled by compressor
   source?: "memory";        // set by memory module on injected messages
+  category?: MessageCategory; // set by relevance filter (Stage 1)
 }
+
+/**
+ * Pure text conversation history used at Context Engine boundaries.
+ * MUST NOT contain raw Claude/Anthropic SDK objects.
+ * All thinking, signature, redacted_thinking, and tool blocks
+ * must be stripped before producing CleanMessage instances.
+ */
+export type CleanMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 export interface Context {
   messages: Message[];
   systemPrompt?: string;
   metadata?: Record<string, unknown>;
+  /** Dev-only: messages filtered out by relevance filter (system logs, telemetry).
+   *  Written to stderr for debugging but NEVER sent to the LLM. */
+  debugMessages?: Message[];
 }
 
 // ─────────────────────────────────────────────
@@ -28,15 +53,10 @@ export interface Context {
 export interface PipelineConfig {
   maxTokens: number;          // hard ceiling for output context
   targetTokens: number;       // soft target after compression
-  compressionRatio: number;   // 0–1, how aggressively to compress
   rankingThreshold: number;   // 0–1, drop messages below this score
   memoryEnabled: boolean;
   memoryTopK: number;         // how many memory hits to inject
-  provider: ProviderType;
-  model: string;
 }
-
-export type ProviderType = "claude" | "openai" | "local";
 
 // ─────────────────────────────────────────────
 // Pipeline result

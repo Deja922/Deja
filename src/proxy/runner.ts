@@ -55,9 +55,9 @@ export async function runProxy(
   const logger = new RunLogger(options.logDir);
   const logPath = logger.save(report);
 
-  // Print to console
+  // Print to console (report always goes to stdout — it's invoked directly by the user)
   printReport(report);
-  console.log(`\n${"\x1b[2m"}Log saved → ${logPath}${"\x1b[0m"}\n`);
+  process.stderr.write(`[deja] log saved → ${logPath}\n`);
 
   return report;
 }
@@ -100,8 +100,6 @@ async function runOptimized(
     maxTokens: opts.maxTokens,
     targetTokens: opts.targetTokens,
     memoryEnabled: opts.memoryEnabled,
-    provider: opts.provider === "mock" ? "claude" : opts.provider,
-    model: opts.model,
   });
 
   const pipeline = new Pipeline();

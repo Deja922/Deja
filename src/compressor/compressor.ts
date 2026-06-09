@@ -6,8 +6,14 @@ import { estimateTokens } from "@/cache/tokenizer.js";
 
 export class Compressor implements ICompressor {
   async compress(context: Context, config: PipelineConfig): Promise<Context> {
-    // Pass 1: dedup is always cheap — run unconditionally
-    const deduped = dropNearDuplicates(context.messages);
+    // Guard: strip any SYSTEM_LOGS/TELEMETRY that leaked through — they must NEVER
+    // be compressed or reach the LLM. Only USER_MEMORY and TASK_MEMORY are eligible.
+    const llmMessages = context.messages.filter(
+      (m) => m.category !== "SYSTEM_LOGS" && m.category !== "TELEMETRY"
+    );
+
+    // Pass 1: dedup — only on LLM-bound messages
+    const deduped = dropNearDuplicates(llmMessages);
     let ctx: Context = { ...context, messages: deduped };
 
     // Early exit if already within target after dedup
@@ -18,16 +24,19 @@ export class Compressor implements ICompressor {
     let messages = scoreMessages(ctx.messages);
 
     // Pass 2: drop messages below ranking threshold, protecting system + last 4
+    // Only drops LLM-bound messages (SYSTEM_LOGS/TELEMETRY already stripped above)
     messages = dropBelowThreshold(messages, config.rankingThreshold);
 
     ctx = { ...ctx, messages };
 
     // Pass 3: still over target → summarise oldest non-system block
+    // Summarisation only touches USER_MEMORY/TASK_MEMORY messages
     if (estimateTokens(ctx) > config.targetTokens) {
       ctx = summarizeOldMessages(ctx, config.targetTokens);
     }
 
     // Pass 4: still over maxTokens → hard truncate message content
+    // Truncation only touches non-system LLM-bound messages
     if (estimateTokens(ctx) > config.maxTokens) {
       ctx = hardTruncate(ctx, config.maxTokens);
     }
@@ -49,7 +58,9 @@ function dropNearDuplicates(messages: Message[]): Message[] {
 
   const deduped: Message[] = [];
   for (const m of body) {
+    // Always keep system messages; always drop system logs / telemetry
     if (m.role === "system") { deduped.push(m); continue; }
+    if (m.category === "SYSTEM_LOGS" || m.category === "TELEMETRY") continue;
 
     const isDup = deduped.some(
       (prev) => prev.role === m.role && jaccardSimilarity(prev.content, m.content) > 0.85
@@ -70,7 +81,8 @@ function dropBelowThreshold(messages: Message[], threshold: number): Message[] {
   const tail = messages.slice(-keepTail);
 
   const filtered = body.filter(
-    (m) => m.role === "system" || (m.importance ?? 1) >= threshold
+    (m) => m.role === "system"
+      || (m.category !== "SYSTEM_LOGS" && m.category !== "TELEMETRY" && (m.importance ?? 1) >= threshold)
   );
 
   return [...filtered, ...tail];
@@ -83,7 +95,12 @@ function dropBelowThreshold(messages: Message[], threshold: number): Message[] {
 function summarizeOldMessages(ctx: Context, targetTokens: number): Context {
   const messages = [...ctx.messages];
   const systemMessages = messages.filter((m) => m.role === "system");
-  const nonSystem = messages.filter((m) => m.role !== "system");
+  // Only summarise USER_MEMORY and TASK_MEMORY — never touch system logs
+  const nonSystem = messages.filter(
+    (m) => m.role !== "system"
+      && m.category !== "SYSTEM_LOGS"
+      && m.category !== "TELEMETRY"
+  );
 
   // How many old messages to fold into a summary?
   // Start by summarising bottom 50% of non-system messages
@@ -117,7 +134,13 @@ function hardTruncate(ctx: Context, maxTokens: number): Context {
 
   while (estimateTokens({ ...ctx, messages }) > maxTokens && i < messages.length) {
     const m = messages[i]!;
-    if (m.role !== "system" && m.content.length > 200) {
+    // Only truncate LLM-bound messages — never touch system logs / telemetry
+    if (
+      m.role !== "system"
+      && m.category !== "SYSTEM_LOGS"
+      && m.category !== "TELEMETRY"
+      && m.content.length > 200
+    ) {
       messages[i] = {
         ...m,
         content: m.content.slice(0, 200) + "… [truncated]",

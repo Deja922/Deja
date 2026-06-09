@@ -1,0 +1,333 @@
+import { randomUUID } from "crypto";
+import type { Context, Message } from "@/types/index.js";
+import { PROTOCOL_BLOCK_TYPES } from "../constants.js";
+import type { IAdapter, MessageRecord, ResendOptions } from "./index.js";
+
+// ── Anthropic wire types ────────────────────────────────────────────────────
+
+interface AnthropicMessage {
+  role: "user" | "assistant";
+  content: string | ContentBlock[];
+}
+
+interface TextBlock {
+  type: "text";
+  text: string;
+  [key: string]: unknown;
+}
+
+interface ContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  tool_use_id?: string;
+  [key: string]: unknown;
+}
+
+interface AnthropicRequest {
+  model: string;
+  messages: AnthropicMessage[];
+  max_tokens?: number;
+  system?: string | ContentBlock[];
+  stream?: boolean;
+  [key: string]: unknown;
+}
+
+// ── Adapter ─────────────────────────────────────────────────────────────────
+
+export class AnthropicAdapter implements IAdapter {
+  readonly pathPattern = /^\/v1\/messages/;
+
+  // ── parse ──────────────────────────────────────────────────────────────
+
+  requestToContext(body: unknown): { context: Context; records: MessageRecord[] } {
+    const req = body as AnthropicRequest;
+    const records: MessageRecord[] = (req.messages ?? []).map((message) => {
+      const id = randomUUID();
+      const content = message.content;
+      return {
+        id,
+        original: message,
+        text: extractMessageText(content, message.role),
+        hasStructuredBlocks: hasStructuredBlocks(content),
+        hasProtocolBlocks: hasProtocolBlocks(content),
+      } as MessageRecord & { original: AnthropicMessage };
+    });
+
+    const messages: Message[] = records.map((record, index) => ({
+      id: record.id,
+      role: (record as MessageRecord & { original: AnthropicMessage }).original.role,
+      content: record.text,
+      timestamp: Date.now() - (records.length - index) * 1000,
+    }));
+
+    const context: Context = { messages };
+    const systemPrompt = extractSystemText(req.system);
+    if (systemPrompt !== undefined) context.systemPrompt = systemPrompt;
+
+    return { context, records };
+  }
+
+  // ── rebuild ────────────────────────────────────────────────────────────
+
+  contextToRequest(
+    ctx: Context,
+    records: MessageRecord[],
+    originalBody: Record<string, unknown>,
+    opts?: ResendOptions,
+  ): AnthropicRequest {
+    const typedRecords = records as (MessageRecord & { original: AnthropicMessage })[];
+    const optimizedById = new Map(ctx.messages.map((m) => [m.id, m]));
+    const messages: AnthropicMessage[] = [];
+
+    for (const record of typedRecords) {
+      const optimized = optimizedById.get(record.id);
+
+      if (!optimized) {
+        // Dropped message — keep only if it has protocol or tool blocks
+        if (record.hasStructuredBlocks || record.hasProtocolBlocks) {
+          messages.push({
+            role: record.original.role,
+            content: cleanContentForResend(record.original.content),
+          });
+        }
+        continue;
+      }
+
+      const newContent = buildCompressedContent(
+        record.original.content,
+        record,
+        optimized.summary ?? optimized.content,
+      );
+
+      messages.push({ role: record.original.role, content: newContent });
+    }
+
+    // Prune stale thinking blocks. Thinking blocks carry a signature that is
+    // only valid for the exact provider/model that produced it — historical
+    // ones break when the upstream changes (cross-provider) or a session is
+    // resumed. Only the active tool-use turn's thinking must be passed back.
+    applyThinkingPolicy(messages, {
+      thinkingEnabled: isThinkingEnabled(originalBody),
+      interleaved: opts?.interleavedThinking ?? false,
+    });
+
+    const result: AnthropicRequest = {
+      ...(originalBody as AnthropicRequest),
+      messages,
+    };
+
+    if (ctx.systemPrompt !== undefined && ctx.systemPrompt !== extractSystemText((originalBody as AnthropicRequest).system)) {
+      result.system = ctx.systemPrompt;
+    }
+
+    return result;
+  }
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function extractSystemText(system: AnthropicRequest["system"]): string | undefined {
+  if (!system) return undefined;
+  if (typeof system === "string") return system;
+
+  const text = (system as Array<TextBlock>)
+    .filter((block): block is TextBlock => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
+
+  return text || undefined;
+}
+
+/**
+ * Extract only user-visible text content, discarding protocol blocks
+ * (thinking/signature/redacted_thinking). The result is sent to the
+ * compression pipeline — protocol blocks must never be compressed.
+ */
+function extractMessageText(
+  content: AnthropicMessage["content"],
+  role: "user" | "assistant",
+): string {
+  if (typeof content === "string") return content;
+
+  const filtered = content.filter((block) => !PROTOCOL_BLOCK_TYPES.has(block.type));
+
+  if (role === "assistant") {
+    return filtered
+      .filter((block): block is TextBlock => block.type === "text" && typeof block.text === "string")
+      .map((block) => block.text)
+      .join("\n");
+  }
+
+  return filtered
+    .map((block) => {
+      if (block.type === "text" && typeof block.text === "string") return block.text;
+      if (block.type === "tool_result" && typeof block.content === "string") return block.content;
+      return null;
+    })
+    .filter((t): t is string => t !== null)
+    .join("\n");
+}
+
+function hasStructuredBlocks(content: AnthropicMessage["content"]): boolean {
+  if (typeof content === "string") return false;
+  return Array.isArray(content) && content.some(
+    (block) => block.type !== "text" && !PROTOCOL_BLOCK_TYPES.has(block.type),
+  );
+}
+
+export function hasProtocolBlocks(content: AnthropicMessage["content"]): boolean {
+  if (typeof content === "string") return false;
+  return Array.isArray(content) && content.some(
+    (block) => PROTOCOL_BLOCK_TYPES.has(block.type),
+  );
+}
+
+/**
+ * Build the content array for a compressed message.
+ *
+ * For protocol-block messages (thinking/signature/redacted_thinking):
+ *   replace only user-visible text blocks with compressed text,
+ *   keep all protocol blocks verbatim.
+ *
+ * For tool messages (tool_use/tool_result):
+ *   keep original blocks intact (no text compression — tool content is critical).
+ *
+ * For simple text messages:
+ *   replace entire content with compressed text string.
+ */
+function buildCompressedContent(
+  original: AnthropicMessage["content"],
+  record: MessageRecord,
+  compressedText: string,
+): AnthropicMessage["content"] {
+  if (typeof original === "string") return compressedText;
+
+  if (record.hasProtocolBlocks) {
+    // Preserve protocol blocks verbatim, only compress user-visible text
+    const cleaned = cleanContentForResend(original);
+    return Array.isArray(cleaned)
+      ? cleaned.map((block) => {
+          if (block.type === "text") return { type: "text", text: compressedText } as ContentBlock;
+          return block;
+        })
+      : compressedText;
+  }
+
+  if (record.hasStructuredBlocks) {
+    // Tool messages — keep original blocks intact
+    return cleanContentForResend(original);
+  }
+
+  // Simple text — replace entirely
+  return compressedText;
+}
+
+// ── thinking-block policy ────────────────────────────────────────────────────
+
+interface ThinkingPolicy {
+  thinkingEnabled: boolean;
+  interleaved: boolean;
+}
+
+function isThinkingEnabled(body: Record<string, unknown>): boolean {
+  const thinking = body["thinking"] as { type?: string } | undefined;
+  return !!thinking && thinking.type === "enabled";
+}
+
+function contentHasToolUse(content: AnthropicMessage["content"]): boolean {
+  return Array.isArray(content) && content.some((block) => block.type === "tool_use");
+}
+
+/**
+ * Remove thinking/redacted_thinking blocks from a single message in place.
+ * The signature lives inside the thinking block, so it is removed with it.
+ * If stripping would empty the content, the message is left untouched (an
+ * empty content array is rejected by the API; this case is effectively
+ * never hit because assistant turns always carry text or tool_use too).
+ */
+function stripThinkingFromMessage(message: AnthropicMessage): void {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return;
+  const filtered = message.content.filter(
+    (block) => !PROTOCOL_BLOCK_TYPES.has(block.type),
+  );
+  if (filtered.length === 0) return;
+  message.content = filtered;
+}
+
+/**
+ * Decide which thinking blocks to keep before forwarding upstream.
+ *
+ *   thinking disabled  → strip every thinking block (e.g. OpenAI-compatible
+ *                        upstreams, or sessions resumed against a provider
+ *                        that never produced these blocks)
+ *   interleaved        → keep thinking in every assistant turn that contains
+ *                        tool_use (the beta requires the full chain during
+ *                        tool use); strip elsewhere
+ *   standard           → keep thinking only in the final assistant turn when
+ *                        it contains tool_use (the only block the API requires
+ *                        to be passed back); strip everything older
+ */
+function applyThinkingPolicy(
+  messages: AnthropicMessage[],
+  policy: ThinkingPolicy,
+): void {
+  if (!policy.thinkingEnabled) {
+    for (const message of messages) stripThinkingFromMessage(message);
+    return;
+  }
+
+  if (policy.interleaved) {
+    for (const message of messages) {
+      if (message.role === "assistant" && contentHasToolUse(message.content)) continue;
+      stripThinkingFromMessage(message);
+    }
+    return;
+  }
+
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (i === lastAssistantIdx && contentHasToolUse(message.content)) continue;
+    stripThinkingFromMessage(message);
+  }
+}
+
+/**
+ * Clean content for resend, preserving ALL blocks including protocol blocks
+ * (thinking/signature/redacted_thinking). Protocol blocks are API state that
+ * must be passed back verbatim.
+ */
+export function cleanContentForResend(
+  content: string | ContentBlock[],
+): string | ContentBlock[] {
+  if (typeof content === "string") return content;
+
+  const cleaned: ContentBlock[] = [];
+  for (const block of content) {
+    if (block.type === "text") {
+      cleaned.push({ type: "text", text: typeof block.text === "string" ? block.text : "" } as ContentBlock);
+    } else if (block.type === "tool_use") {
+      const rebuilt: ContentBlock = { type: "tool_use", id: block.id, input: block.input };
+      if (block.name !== undefined) rebuilt.name = block.name;
+      cleaned.push(rebuilt);
+    } else if (block.type === "tool_result") {
+      const rebuilt: ContentBlock = { type: "tool_result", content: block.content };
+      if (block.tool_use_id !== undefined) rebuilt.tool_use_id = block.tool_use_id;
+      cleaned.push(rebuilt);
+    } else {
+      // Preserve protocol blocks (thinking, signature, redacted_thinking) and
+      // any other unknown blocks — they are API protocol state.
+      cleaned.push({ ...block });
+    }
+  }
+
+  return cleaned.length === 0 ? [{ type: "text", text: "" }] : cleaned;
+}

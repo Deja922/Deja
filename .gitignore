@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-tray/
+dist-electron/
 *.js.map
 .env
 .env.local
@@ -10,6 +12,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+Thumbs.db:encryptable
 
 # Editor
 .vscode/
@@ -19,3 +22,11 @@ Thumbs.db
 # Demo recordings — keep the output GIF, ignore the raw cast
 demo.cast
 *.cast
+
+# Temp / build artifacts
+gen-icons.cjs
+agg.exe
+fix_join.py
+plan-text.txt
+demo.tape
+*.output

@@ -25,8 +25,8 @@ function computeAvgRedundancyRate(rounds: SessionRound[]): number {
 
   const rates: number[] = [];
   for (let i = 1; i < rounds.length; i++) {
-    const prev = tokenize(rounds[i - 1].response);
-    const curr = tokenize(rounds[i].response);
+    const prev = tokenize(rounds[i - 1]!.response);
+    const curr = tokenize(rounds[i]!.response);
     rates.push(jaccard(prev, curr));
   }
   return round2(rates.reduce((a, b) => a + b, 0) / rates.length);

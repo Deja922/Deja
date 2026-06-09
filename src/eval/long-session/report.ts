@@ -119,8 +119,8 @@ function printRoundTable(report: LongSessionReport): void {
 
   const n = Math.min(report.baseline.rounds.length, report.optimized.rounds.length);
   for (let i = 0; i < n; i++) {
-    const b = report.baseline.rounds[i];
-    const o = report.optimized.rounds[i];
+    const b = report.baseline.rounds[i]!;
+    const o = report.optimized.rounds[i]!;
     const savings = ((b.promptTokens - o.promptTokens) / Math.max(b.promptTokens, 1)) * 100;
     const savStr = savings > 0
       ? `\x1b[32m+${savings.toFixed(1)}%\x1b[0m`
@@ -199,7 +199,23 @@ function printVerdict(report: LongSessionReport): void {
   console.log(`\x1b[1m  Final Verdict\x1b[0m\n`);
   console.log(`  ${s.verdict}`);
   console.log(`\n  Total tokens saved: \x1b[32m${s.totalTokenSaved.toLocaleString()}\x1b[0m  |  Avg savings: \x1b[32m${s.avgTokenSavingsPct > 0 ? "+" : ""}${s.avgTokenSavingsPct.toFixed(1)}%\x1b[0m  |  Peak savings: \x1b[32m+${s.peakTokenSavingsPct.toFixed(1)}%\x1b[0m`);
-  console.log(`  Quality delta: ${s.qualityDelta >= 0 ? "\x1b[32m+" : "\x1b[31m"}${s.qualityDelta.toFixed(1)}\x1b[0m  |  Memory retention delta: ${s.memoryRetentionDelta >= 0 ? "\x1b[32m+" : "\x1b[31m"}${s.memoryRetentionDelta.toFixed(1)}\x1b[0m\n`);
+  console.log(`  Quality delta: ${s.qualityDelta >= 0 ? "\x1b[32m+" : "\x1b[31m"}${s.qualityDelta.toFixed(1)}\x1b[0m  |  Memory retention delta: ${s.memoryRetentionDelta >= 0 ? "\x1b[32m+" : "\x1b[31m"}${s.memoryRetentionDelta.toFixed(1)}\x1b[0m`);
+
+  // Protocol error summary
+  const bErrors = report.baseline.protocolErrors;
+  const oErrors = report.optimized.protocolErrors;
+  if (bErrors > 0 || oErrors > 0) {
+    console.log(`  \x1b[31mProtocol errors: baseline=${bErrors} optimized=${oErrors}\x1b[0m`);
+    for (const r of report.baseline.rounds) {
+      if (r.protocolError) console.log(`    baseline round ${r.turnId}: ${r.protocolError}`);
+    }
+    for (const r of report.optimized.rounds) {
+      if (r.protocolError) console.log(`    optimized round ${r.turnId}: ${r.protocolError}`);
+    }
+  } else {
+    console.log(`  Protocol errors: \x1b[32m0\x1b[0m — no signature/thinking errors detected`);
+  }
+  console.log();
 }
 
 // ── summary builder ───────────────────────────────────────────────────────
@@ -212,7 +228,7 @@ export function buildLongSummary(
   const n = Math.min(baseline.rounds.length, optimized.rounds.length);
 
   const savingsPcts = baseline.rounds.slice(0, n).map((b, i) => {
-    const o = optimized.rounds[i];
+    const o = optimized.rounds[i]!;
     return ((b.promptTokens - o.promptTokens) / Math.max(b.promptTokens, 1)) * 100;
   });
 

@@ -109,10 +109,10 @@ function renderIntro(): void {
 
 function renderFrame(round: number): void {
   const i      = round - 1;
-  const bTok   = BASELINE_TOKENS[i];
-  const oTok   = OPTIMIZED_TOKENS[i];
-  const bQ     = BASELINE_QUALITY[i];
-  const oQ     = OPTIMIZED_QUALITY[i];
+  const bTok   = BASELINE_TOKENS[i]!;
+  const oTok   = OPTIMIZED_TOKENS[i]!;
+  const bQ     = BASELINE_QUALITY[i]!;
+  const oQ     = OPTIMIZED_QUALITY[i]!;
   const isCkpt = CHECKPOINTS.has(round);
   const maxTok = 22000;
   const barW   = 14;  // 14 chars + " xx%" = 18 visible, fits in COLW=36

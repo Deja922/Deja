@@ -92,8 +92,6 @@ async function runOptimized(
     maxTokens: opts.maxTokens,
     targetTokens: opts.targetTokens,
     memoryEnabled: true,
-    provider: opts.provider === "mock" ? "claude" : opts.provider,
-    model: opts.model,
   });
 
   const pipeline = new Pipeline();
@@ -156,7 +154,7 @@ function buildContext(task: EvalTask): Context {
 
   return {
     messages,
-    systemPrompt: task.systemPrompt,
+    ...(task.systemPrompt !== undefined ? { systemPrompt: task.systemPrompt } : {}),
   };
 }
 

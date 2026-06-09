@@ -1,4 +1,4 @@
-import type { Context } from "@/types/index.js";
+import type { Context, ProviderResponse } from "@/types/index.js";
 import type { IProvider, ProviderRequest } from "@/providers/index.js";
 import { estimateTokens } from "@/cache/tokenizer.js";
 
@@ -13,7 +13,7 @@ export class MockProvider implements IProvider {
     this.label = label;
   }
 
-  async send(req: ProviderRequest): Promise<ReturnType<IProvider["send"]>> {
+  async send(req: ProviderRequest): Promise<ProviderResponse> {
     await simulateLatency(80, 180);
 
     const lastUser = [...req.context.messages]

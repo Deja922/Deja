@@ -26,7 +26,7 @@ export class MemoryStore implements IMemoryStore {
       content,
       embedding,
       createdAt: Date.now(),
-      tags,
+      ...(tags !== undefined ? { tags } : {}),
     };
     this.db.insert(entry);
   }

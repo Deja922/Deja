@@ -13,14 +13,29 @@ import type {
 } from "./types.js";
 import { computeMetrics } from "./metrics.js";
 
+const WORKFLOW_PROMPTS: Record<string, string> = {
+  coding:
+    "You are a senior TypeScript engineer helping build the ContextEngine middleware project. " +
+    "Be specific, technical, and reference decisions made earlier in the session when relevant.",
+  planning:
+    "You are a senior product manager and technical architect planning a complex product launch. " +
+    "Be analytical, structured, and always reference earlier decisions and constraints. " +
+    "Use frameworks (MoSCoW, risk matrices, phase planning) consistently.",
+  agent:
+    "You are a senior SRE designing and operating OpsBot, an AI agent for automated DevOps incident response. " +
+    "Be precise, safety-conscious, and always consider blast radius, guardrails, and rollback procedures. " +
+    "Reference earlier incidents and design decisions when relevant.",
+};
+
 export async function runSession(
   turns: LongSessionTurn[],
   mode: SessionMode,
+  workflow: "coding" | "planning" | "agent",
   opts: LongEvalOptions
 ): Promise<LongSessionResult> {
   const rounds: SessionRound[] = [];
-  // Accumulates the full conversation history across all rounds
   const history: Message[] = [];
+  const protocolErrors: { turnId: number; error: string }[] = [];
 
   for (const turn of turns) {
     const userMsg: Message = {
@@ -31,11 +46,10 @@ export async function runSession(
     };
     history.push(userMsg);
 
+    const sysPrompt = (WORKFLOW_PROMPTS[workflow] ?? WORKFLOW_PROMPTS["coding"]) as string;
     const rawContext: Context = {
       messages: [...history],
-      systemPrompt:
-        "You are a senior TypeScript engineer helping build the ContextEngine middleware project. " +
-        "Be specific, technical, and reference decisions made earlier in the session when relevant.",
+      systemPrompt: sysPrompt,
     };
 
     const historyTokens = estimateTokens(rawContext);
@@ -49,8 +63,6 @@ export async function runSession(
         maxTokens: opts.maxTokens,
         targetTokens: opts.targetTokens,
         memoryEnabled: true,
-        provider: opts.provider === "mock" ? "claude" : opts.provider,
-        model: opts.model,
       });
       const pipeline = new Pipeline();
       const result = await pipeline.run(rawContext, config);
@@ -69,7 +81,27 @@ export async function runSession(
     const provider = createProvider(opts.provider, opts.model);
 
     const t0 = Date.now();
-    const response = await provider.send({ context: contextToSend, maxTokens: 1024 });
+    let protocolError: string | undefined;
+    let response: { content: string; usage: { promptTokens: number; completionTokens: number; totalTokens: number } };
+
+    try {
+      response = await provider.send({ context: contextToSend, maxTokens: 1024 });
+    } catch (err) {
+      const msg = (err as Error).message.toLowerCase();
+      if (msg.includes("signature")) protocolError = "signature";
+      else if (msg.includes("thinking")) protocolError = "thinking";
+      else if (msg.includes("rate") || msg.includes("429")) protocolError = "rate_limit";
+      else if (msg.includes("timeout")) protocolError = "timeout";
+      else if (msg.includes("tls") || msg.includes("socket")) protocolError = "network";
+      else protocolError = `unknown: ${(err as Error).message.slice(0, 60)}`;
+
+      protocolErrors.push({ turnId: turn.id, error: protocolError });
+
+      response = {
+        content: `[ERROR: ${protocolError}]`,
+        usage: { promptTokens: historyTokens, completionTokens: 0, totalTokens: historyTokens },
+      };
+    }
     const latencyMs = Date.now() - t0;
 
     const { score } = scoreHeuristic(
@@ -92,12 +124,13 @@ export async function runSession(
       promptTokens: response.usage.promptTokens,
       completionTokens: response.usage.completionTokens,
       historyTokens,
-      compressedHistoryTokens,
+      ...(compressedHistoryTokens !== undefined ? { compressedHistoryTokens } : {}),
       response: response.content,
       qualityScore: judgeScore !== undefined ? round2(score * 0.4 + judgeScore * 0.6) : score,
-      judgeScore,
+      ...(judgeScore !== undefined ? { judgeScore } : {}),
       latencyMs,
-      pipelineStats,
+      ...(protocolError !== undefined ? { protocolError } : {}),
+      ...(pipelineStats !== undefined ? { pipelineStats } : {}),
     };
     rounds.push(round);
 
@@ -112,7 +145,7 @@ export async function runSession(
   }
 
   const metrics = computeMetrics(rounds, turns);
-  return { mode, rounds, metrics };
+  return { mode, rounds, metrics, protocolErrors: protocolErrors.length };
 }
 
 function round2(n: number): number {

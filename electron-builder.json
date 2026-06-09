@@ -1,0 +1,18 @@
+{
+  "appId": "com.deja.tray",
+  "productName": "Deja Tray",
+  "directories": {
+    "output": "dist-electron"
+  },
+  "files": [
+    "dist-tray/**/*",
+    "src/tray/icons/**/*"
+  ],
+  "extraMetadata": {
+    "main": "dist-tray/main.js"
+  },
+  "win": {
+    "target": "dir",
+    "icon": "src/tray/icons/app-icon.png"
+  }
+}

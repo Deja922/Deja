@@ -38,14 +38,15 @@ const raw = program.opts<{
   verbose: boolean;
 }>();
 
+const taskFilter = raw.task.length > 0 ? (raw.task as EvalOptions["taskFilter"]) : undefined;
 const opts: EvalOptions = {
-  taskFilter: raw.task.length > 0 ? (raw.task as EvalOptions["taskFilter"]) : undefined,
+  ...(taskFilter !== undefined ? { taskFilter } : {}),
   provider: raw.provider as EvalOptions["provider"],
   model: raw.model,
   maxTokens: parseInt(raw.maxTokens, 10),
   targetTokens: parseInt(raw.targetTokens, 10),
   judgeEnabled: raw.judge,
-  outputFile: raw.output,
+  ...(raw.output !== undefined ? { outputFile: raw.output } : {}),
   verbose: raw.verbose,
   mode: (raw.mode as EvalOptions["mode"]) ?? "both",
 };

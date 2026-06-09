@@ -8,7 +8,18 @@ export type TurnTopic =
   | "provider_router"
   | "cli_optimization"
   | "testing"
-  | "deployment";
+  | "deployment"
+  | "requirements"
+  | "scope_definition"
+  | "architecture_design"
+  | "risk_assessment"
+  | "implementation_plan"
+  | "launch_planning"
+  | "agent_setup"
+  | "tool_execution"
+  | "error_recovery"
+  | "multi_step_workflow"
+  | "production_monitoring";
 
 export interface LongSessionTurn {
   id: number;               // 1–20
@@ -35,6 +46,7 @@ export interface SessionRound {
   qualityScore: number;      // 0–10 heuristic
   judgeScore?: number;       // 0–10 Claude Haiku judge (if enabled)
   latencyMs: number;
+  protocolError?: string;    // "signature" | "thinking" | "rate_limit" | etc — null if no error
   pipelineStats?: {
     originalTokens: number;
     outputTokens: number;
@@ -57,6 +69,7 @@ export interface LongSessionResult {
   mode: SessionMode;
   rounds: SessionRound[];
   metrics: LongSessionMetrics;
+  protocolErrors: number;  // count of rounds that hit signature/thinking/protocol errors
 }
 
 export interface LongSessionReport {
@@ -99,4 +112,5 @@ export interface LongEvalOptions {
   verbose: boolean;
   numRounds: number;
   mode: "baseline" | "optimized" | "both";
+  workflow?: "coding" | "planning" | "agent";
 }

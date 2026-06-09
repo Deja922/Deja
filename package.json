@@ -3,14 +3,28 @@
   "version": "0.1.0",
   "description": "Stop AI coding sessions from bloating — compress, deduplicate, and stabilize LLM context",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/core/index.js",
   "bin": {
-    "ctx": "./src/cli/index.ts",
-    "ai-context": "./src/cli/ai-context.ts"
+    "deja": "./dist/cli/deja.js"
   },
+  "files": [
+    "dist/",
+    "config/",
+    "scripts/",
+    "src/tray/icons/",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
-    "dev": "tsx src/cli/index.ts",
-    "build": "tsc",
+    "dev": "tsx src/cli/deja.ts",
+    "build": "tsc && tsc-alias",
+    "build:tray": "tsc --project tsconfig.tray.json",
+    "package:tray": "electron-builder --config electron-builder.json",
+    "build:all": "npm run build && npm run build:tray",
+    "service:install": "node dist/service/windows-service.js register",
+    "service:remove": "node dist/service/windows-service.js uninstall",
+    "prepublishOnly": "npm run build && npm test",
+    "postinstall": "node scripts/postinstall-check.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -18,16 +32,40 @@
     "eval:long": "tsx src/cli/long-eval.ts",
     "demo": "tsx src/cli/demo.ts"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Deja922/Deja"
+  },
+  "bugs": {
+    "url": "https://github.com/Deja922/Deja/issues"
+  },
+  "author": "Deja922",
+  "keywords": [
+    "claude-code",
+    "context-compression",
+    "llm-token",
+    "ai-coding",
+    "proxy",
+    "anthropic",
+    "openai",
+    "deepseek"
+  ],
   "dependencies": {
-    "openai": "^4.47.1",
     "@anthropic-ai/sdk": "^0.24.3",
     "commander": "^12.1.0",
-    "zod": "^3.23.8"
+    "node-windows": "^1.0.0-beta.8",
+    "openai": "^4.47.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "typescript": "^5.4.5",
+    "electron": "^31.7.7",
+    "electron-builder": "^25.1.8",
+    "tsc-alias": "^1.8.17",
     "tsx": "^4.15.7",
+    "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   }
 }

@@ -1,7 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { IProvider, ProviderRequest, ProviderResponse } from "./index.js";
-import type { Context } from "@/types/index.js";
+import type { Context, CleanMessage } from "@/types/index.js";
 import { estimateTokens } from "@/cache/tokenizer.js";
+
+/**
+ * Normalize internal pipeline messages to clean API format.
+ * ALWAYS reconstructs from scratch — NEVER reuses raw SDK objects.
+ * Only { role, content } are serialized; all other fields are discarded.
+ */
+function normalizeMessages(context: Context): { role: "user" | "assistant"; content: string }[] {
+  return context.messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: String(m.content ?? ""),
+    }));
+}
 
 export class ClaudeProvider implements IProvider {
   private client: Anthropic;
@@ -13,20 +27,27 @@ export class ClaudeProvider implements IProvider {
   }
 
   async send(req: ProviderRequest): Promise<ProviderResponse> {
-    const messages = req.context.messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    // Reconstruct messages from scratch — never carry raw SDK objects
+    const messages = normalizeMessages(req.context);
 
-    const response = await this.client.messages.create({
+    const params: {
+      model: string;
+      max_tokens: number;
+      messages: { role: "user" | "assistant"; content: string }[];
+      system?: string;
+    } = {
       model: this.model,
       max_tokens: req.maxTokens,
-      system: req.context.systemPrompt,
       messages,
-    });
+    };
+    if (req.context.systemPrompt !== undefined) {
+      params.system = req.context.systemPrompt;
+    }
 
-    const content = response.content[0]?.type === "text"
-      ? response.content[0].text
-      : "";
+    const response = await this.client.messages.create(params);
+
+    const textBlock = response.content.find((b): b is { type: "text"; text: string } => b.type === "text");
+    const content = textBlock?.text ?? "";
 
     return {
       content,
@@ -39,7 +60,6 @@ export class ClaudeProvider implements IProvider {
   }
 
   async countTokens(context: Context): Promise<number> {
-    // Use fast estimate; Claude's actual count requires an API call
     return estimateTokens(context);
   }
 }
