@@ -1,21 +1,32 @@
-MIT License
+Business Source License 1.1
 
-Copyright (c) 2026 Deja922
+Licensor: Deja922
+Licensed Work: Deja Context Engine
+Change Date: 2030-01-01
+Change License: Apache License, Version 2.0
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Use Limitation:
+The Licensed Work may not be used for a "Commercial Use" without a separate
+commercial license from the Licensor. "Commercial Use" means use of the
+Licensed Work in a product or service that is offered for sale, licensed,
+or otherwise made available to third parties for a fee or other commercial
+consideration.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Personal Use, open-source projects, and internal business use (where the
+Licensed Work is not itself a product being sold) are NOT "Commercial Use"
+and are permitted under this License.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+On the Change Date, the Licensed Work will be made available under the
+Change License (Apache 2.0), and commercial restrictions will no longer apply.
+
+For commercial licensing inquiries, contact the Licensor via GitHub:
+https://github.com/Deja922/Deja
+
+---
+
+The Licensed Work is (c) 2026 Deja922
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the above Use Limitation is respected.
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
