@@ -9,6 +9,7 @@ import { startProxy } from "../proxy/server.js";
 import { writeManagedSettings, isManagedSettingsActive } from "../cli/managed-settings.js";
 import type { RuntimeConfig } from "../proxy/config-types.js";
 import { DEFAULT_CONFIG } from "../proxy/config-types.js";
+import { checkAndUpdateInBackground } from "./updater.js";
 
 // 标记服务模式：server.ts 据此跳过 shutdown 时删除 managed-settings.json
 process.env["DEJA_SERVICE_MODE"] = "1";
@@ -53,3 +54,6 @@ startProxy({
   config,
   verbose: false,
 });
+
+// 启动后 30 秒检查更新（不阻塞代理启动）
+setTimeout(() => { void checkAndUpdateInBackground(); }, 30_000);
