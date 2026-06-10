@@ -14,6 +14,12 @@ interface SessionSnapshot {
   compressThreshold?: number;
   lastRequestTokens?: number;
   lastRequestCompressed?: boolean | null;
+  licenseMonthlyUsage?: number;
+  licenseMonthlyLimit?: number | null;
+  licenseLimitReached?: boolean;
+  licenseTier?: string;
+  licenseEmail?: string;
+  licenseExpiry?: number;
 }
 
 export function renderDashboard(s: SessionSnapshot): string {
@@ -78,11 +84,38 @@ export function renderDashboard(s: SessionSnapshot): string {
   }
   .badge-ok { background: #23863633; color: #3fb950; }
   .badge-info { background: #1f6feb33; color: #58a6ff; }
+  .badge-warn { background: #9e6a0333; color: #d2991d; }
+  .badge-danger { background: #da363333; color: #f85149; }
+  .banner {
+    border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 2rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  .banner-limit {
+    background: #2d1a1a; border: 1px solid #f8514966;
+    color: #f85149;
+  }
+  .banner a { color: #58a6ff; text-decoration: underline; }
+  .usage-bar-wrap {
+    background: #21262d; border-radius: 4px; height: 8px;
+    margin-top: 0.5rem; overflow: hidden; width: 100%;
+  }
+  .usage-bar-fill {
+    height: 100%; border-radius: 4px; transition: width 0.5s;
+  }
 </style>
 </head>
 <body>
   <h1>Deja Context Engine</h1>
   <p class="subtitle">Context compression proxy — ${s.upstreamOk === false ? "degraded (upstream unreachable)" : "running"} &middot; Mode: <span class="badge badge-${s.mode === "demo" ? "info" : s.mode === "aggressive" ? "info" : "ok"}">${(s.mode ?? "production").toUpperCase()}</span></p>
+
+  ${s.licenseLimitReached ? `
+  <div class="banner banner-limit">
+    <span style="font-size:1.5rem;">🔒</span>
+    <div>
+      <strong>免费版已达月限（${s.licenseMonthlyUsage ?? 0} / ${s.licenseMonthlyLimit ?? 100} 次）</strong><br>
+      <span style="font-size:0.85rem;">本月压缩次数已用完，后续请求将直接透传。运行 <code>deja license:activate &lt;key&gt;</code> 激活 Pro 解锁无限压缩。</span>
+    </div>
+  </div>` : ""}
 
   <div class="grid">
     <div class="card">
@@ -108,6 +141,16 @@ export function renderDashboard(s: SessionSnapshot): string {
     <div class="card">
       <div class="value">${pct}%</div>
       <div class="label">Compression Ratio</div>
+    </div>
+    <div class="card">
+      <div class="value ${s.licenseLimitReached ? "badge-danger" : ""}" style="${s.licenseLimitReached ? "color:#f85149" : ""}">
+        ${s.licenseMonthlyUsage ?? 0}${s.licenseMonthlyLimit ? " / " + s.licenseMonthlyLimit : ""}
+      </div>
+      <div class="label">本月压缩次数 <span class="badge ${s.licenseTier === "pro" || s.licenseTier === "team" ? "badge-ok" : "badge-info"}">${(s.licenseTier ?? "free").toUpperCase()}</span></div>
+      ${s.licenseMonthlyLimit ? `
+      <div class="usage-bar-wrap">
+        <div class="usage-bar-fill" style="width:${Math.min(Math.round(((s.licenseMonthlyUsage ?? 0) / s.licenseMonthlyLimit) * 100), 100)}%; background:${s.licenseLimitReached ? "#f85149" : "#238636"}"></div>
+      </div>` : ""}
     </div>
   </div>
 
@@ -171,6 +214,20 @@ export function renderDashboard(s: SessionSnapshot): string {
         : `<span class="badge badge-info">SKIPPED</span> ${(s.lastRequestTokens ?? 0).toLocaleString()} tok &lt; ${(s.compressThreshold ?? 200)} tok`
       }</td>
     </tr>` : ""}
+    <tr>
+      <td>License</td>
+      <td>
+        <span class="badge ${s.licenseTier === "pro" || s.licenseTier === "team" ? "badge-ok" : "badge-info"}">${(s.licenseTier ?? "FREE").toUpperCase()}</span>
+        ${s.licenseEmail ? `&nbsp;<span style="color:#8b949e;font-size:0.8rem">${s.licenseEmail}</span>` : ""}
+        ${s.licenseExpiry ? `&nbsp;<span style="color:#8b949e;font-size:0.8rem">到期 ${new Date(s.licenseExpiry).toLocaleDateString("zh-CN")}</span>` : ""}
+      </td>
+    </tr>
+    <tr>
+      <td>本月用量</td>
+      <td>${s.licenseMonthlyUsage ?? 0} / ${s.licenseMonthlyLimit != null ? s.licenseMonthlyLimit + " 次" : "无限制"}
+        ${s.licenseLimitReached ? '&nbsp;<span class="badge badge-danger">已达上限</span>' : ""}
+      </td>
+    </tr>
   </table>
 
   <div style="margin-top:2rem; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:1.25rem;">
