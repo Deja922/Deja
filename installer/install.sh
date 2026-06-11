@@ -376,13 +376,26 @@ else
   warn "curl http://127.0.0.1:${PORT}/health"
 fi
 
+DASHBOARD_URL="http://127.0.0.1:${PORT}/__deja__"
+
 echo
 echo "  ============================="
 echo "  Install complete"
 echo "  ============================="
 echo
 echo "  Config      : $CONFIG_DIR/config.json"
-echo "  Dashboard   : http://127.0.0.1:${PORT}/__deja__"
+echo "  Dashboard   : $DASHBOARD_URL"
 echo "  Doctor      : node $APP_ROOT/dist/cli/deja.js doctor --port $PORT"
 echo "  Tools setup : node $APP_ROOT/dist/cli/deja.js tools:install all --port $PORT"
+echo
+echo "  Opening dashboard in browser..."
+if [[ "$PLATFORM" == "darwin" ]]; then
+  sleep 2
+  open "$DASHBOARD_URL" 2>/dev/null || echo "  Bookmark this URL: $DASHBOARD_URL"
+elif command -v xdg-open >/dev/null 2>&1; then
+  sleep 2
+  xdg-open "$DASHBOARD_URL" 2>/dev/null || echo "  Bookmark this URL: $DASHBOARD_URL"
+else
+  echo "  Bookmark this URL: $DASHBOARD_URL"
+fi
 echo
