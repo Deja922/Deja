@@ -243,7 +243,7 @@ export function renderDashboard(s: SessionSnapshot): string {
   </div>
 
   <div class="footer">
-    Deja v0.1.2 &middot; <span id="countdown">自动刷新中...</span>
+    Deja v0.1.3 &middot; <span id="countdown">自动刷新中...</span>
   </div>
 <script>
   let t = 5;
