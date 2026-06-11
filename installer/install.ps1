@@ -44,6 +44,7 @@ try {
 # Step 2: Download release
 Write-Host ""
 Write-Host "  [2/6] Downloading Deja..." -ForegroundColor White
+$rel = $null
 if (-not $ReleaseTag) {
     try {
         $api = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
@@ -53,6 +54,15 @@ if (-not $ReleaseTag) {
         Write-Host "  OK  Latest version: $ReleaseTag" -ForegroundColor Green
     } catch {
         Write-Host "  ERROR: Cannot fetch release info: $($_.Exception.Message)" -ForegroundColor Red; exit 1
+    }
+} else {
+    try {
+        $api = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/tags/$ReleaseTag"
+        $hdr = @{ "User-Agent"="deja-installer/1.0"; "Accept"="application/vnd.github+json" }
+        $rel = Invoke-RestMethod -Uri $api -Headers $hdr -TimeoutSec 15
+        Write-Host "  OK  Version: $ReleaseTag" -ForegroundColor Green
+    } catch {
+        Write-Host "  ERROR: Cannot fetch release $ReleaseTag`: $($_.Exception.Message)" -ForegroundColor Red; exit 1
     }
 }
 $zipAsset = $rel.assets | Where-Object { $_.name -like "*win-x64*.zip" } | Select-Object -First 1
@@ -199,4 +209,17 @@ Write-Host "  Upstream API : $Upstream" -ForegroundColor Gray
 Write-Host "  Service      : auto-start on boot, auto-restart on crash" -ForegroundColor Gray
 Write-Host "  Dashboard    : http://localhost:$Port/__deja__" -ForegroundColor Cyan
 Write-Host "  Uninstall    : powershell -File `"$INSTALL_DIR\installer\uninstall.ps1`"" -ForegroundColor Gray
+Write-Host ""
+
+# Add node wrapper to PATH so users can run `deja` directly
+$dejaShim = "$env:USERPROFILE\.deja\deja.cmd"
+[System.IO.File]::WriteAllText($dejaShim, "@echo off`r`nnode `"$INSTALL_DIR\dist\cli\deja.js`" %*`r`n", [System.Text.Encoding]::ASCII)
+$userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+$dejaDir  = "$env:USERPROFILE\.deja"
+if ($userPath -notlike "*$dejaDir*") {
+    [System.Environment]::SetEnvironmentVariable("Path", "$userPath;$dejaDir", "User")
+    Write-Host "  OK  Added deja to PATH (restart terminal to use 'deja' command)" -ForegroundColor Green
+} else {
+    Write-Host "  OK  deja already in PATH" -ForegroundColor Green
+}
 Write-Host ""

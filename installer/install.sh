@@ -273,6 +273,24 @@ npm ci --omit=dev --prefer-offline || npm install --omit=dev
 echo "$RELEASE_TAG_FOUND" > "$APP_ROOT/VERSION"
 ok "Installed to $APP_ROOT"
 
+# Create deja symlink so users can run `deja` directly
+DEJA_LINK="$HOME/.local/bin/deja"
+DEJA_NODE_BIN="$APP_ROOT/dist/cli/deja.js"
+if command -v node >/dev/null 2>&1; then
+  mkdir -p "$HOME/.local/bin"
+  printf '#!/usr/bin/env sh\nexec node "%s" "$@"\n' "$DEJA_NODE_BIN" > "$DEJA_LINK"
+  chmod +x "$DEJA_LINK"
+  # Add ~/.local/bin to PATH in shell profile if not already present
+  for profile in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+    if [[ -f "$profile" ]] && ! grep -q '\.local/bin' "$profile" 2>/dev/null; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"
+      break
+    fi
+  done
+  ok "deja command installed → $DEJA_LINK"
+  info "(run 'source ~/.zshrc' or open a new terminal to use 'deja' directly)"
+fi
+
 info
 info "[3/5] Writing config..."
 if [[ "$UNATTENDED" != "1" && -z "$PROVIDER" ]]; then
