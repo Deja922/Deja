@@ -337,12 +337,17 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       // Parse request into internal Context format
       const { context: rawCtx, records } = adapter.requestToContext(body);
       const rawTokens = estimateTokens(rawCtx);
+      // Claude Code sends heavy tool_use/tool_result blocks that extractMessageText
+      // strips out — use the full JSON body size as the token estimate for threshold
+      // decisions so agentic sessions actually trigger compression.
+      const fullBodyTokens = Math.ceil(rawBody.length / 4);
+      const effectiveTokens = Math.max(rawTokens, fullBodyTokens);
 
       // 智能自动 bypass（auto-high-compression）：已经进入安全模式，检查是否可以自动恢复
       // 恢复条件：上下文已缩小到压缩阈值以下（通常意味着新对话开始）
       if (session.bypass && session.bypassReason === "auto-high-compression") {
         const threshold = config.pipeline.compressThreshold;
-        if (rawTokens < threshold) {
+        if (effectiveTokens < threshold) {
           session.bypass = false;
           session.bypassReason = null;
           if (verbose) {
@@ -364,7 +369,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         const msgCount = (body["messages"] as unknown[])?.length ?? 0;
         const structuredCount = records.filter((r) => r.hasStructuredBlocks).length;
         process.stderr.write(
-          `[deja] POST ${req.url} msgs=${msgCount} ~${rawTokens}tok` +
+          `[deja] POST ${req.url} msgs=${msgCount} ~${effectiveTokens}tok (text=${rawTokens} body=${fullBodyTokens})` +
             ` sys=${rawCtx.systemPrompt ? "yes" : "no"}` +
             ` structured=${structuredCount}\n`
         );
@@ -372,22 +377,22 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
 
       writeProxyLog({
         ts: new Date().toISOString(), type: "request",
-        msg: `POST ${req.url ?? ""} msgs=${rawCtx.messages.length} ~${rawTokens}tok`,
-        data: { url: req.url, messageCount: rawCtx.messages.length, rawTokens },
+        msg: `POST ${req.url ?? ""} msgs=${rawCtx.messages.length} ~${effectiveTokens}tok`,
+        data: { url: req.url, messageCount: rawCtx.messages.length, rawTokens, fullBodyTokens },
       });
 
       // Below threshold → skip compression, forward as-is
       const threshold = config.pipeline.compressThreshold;
-      if (rawTokens < threshold) {
+      if (effectiveTokens < threshold) {
         session.skipped++;
-        session.lastRequestTokens = rawTokens;
+        session.lastRequestTokens = effectiveTokens;
         session.lastRequestCompressed = false;
         if (verbose) {
           process.stderr.write(
-            `[deja] compression skipped (context below threshold: ${rawTokens}tok < ${threshold}tok)\n`
+            `[deja] compression skipped (context below threshold: ${effectiveTokens}tok < ${threshold}tok)\n`
           );
         }
-        passthrough(req, rawBody, res, provider, `${rawTokens}tok<threshold`, verbose);
+        passthrough(req, rawBody, res, provider, `${effectiveTokens}tok<threshold`, verbose);
         return;
       }
 
