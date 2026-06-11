@@ -83,3 +83,13 @@ if (Test-Path $installDir) {
 Write-Host ""
 Write-Host "  ✅ Deja 已完全卸载。Claude Code 将恢复直连上游 API。" -ForegroundColor Green
 Write-Host ""
+
+# Remove deja.cmd shim and PATH entry added by installer
+$dejaShim = "$env:USERPROFILE\.deja\deja.cmd"
+if (Test-Path $dejaShim) { Remove-Item $dejaShim -Force -ErrorAction SilentlyContinue }
+$dejaDir  = "$env:USERPROFILE\.deja"
+$userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -like "*$dejaDir*") {
+    $newPath = ($userPath -split ";" | Where-Object { $_ -ne $dejaDir }) -join ";"
+    [System.Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+}

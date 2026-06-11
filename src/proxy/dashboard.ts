@@ -6,6 +6,7 @@ interface SessionSnapshot {
   totalOriginalTokens: number;
   totalOutputTokens: number;
   startTime: number;
+  port?: number;
   upstreamOk?: boolean | null;
   retryCount?: number;
   mode?: string;
@@ -188,7 +189,7 @@ export function renderDashboard(s: SessionSnapshot): string {
     </tr>
     <tr>
       <td>Endpoint</td>
-      <td><span class="badge badge-info">http://localhost:9090</span></td>
+      <td><span class="badge badge-info">http://localhost:${s.port ?? 9090}</span></td>
     </tr>
     <tr>
       <td>Compression Mode</td>
@@ -242,8 +243,17 @@ export function renderDashboard(s: SessionSnapshot): string {
   </div>
 
   <div class="footer">
-    Deja v0.1.1 &middot; Refresh to update &middot; Requests update in real time
+    Deja v0.1.2 &middot; <span id="countdown">自动刷新中...</span>
   </div>
+<script>
+  let t = 5;
+  const el = document.getElementById('countdown');
+  setInterval(() => {
+    t--;
+    if (t <= 0) { location.reload(); }
+    else { el.textContent = t + '秒后自动刷新'; }
+  }, 1000);
+</script>
 </body>
 </html>`;
 }

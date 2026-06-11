@@ -290,6 +290,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(renderDashboard({
           ...session,
+          port: config.port,
           mode: config.pipeline.mode ?? "production",
           targetTokens: config.pipeline.targetTokens,
           maxTokens: config.pipeline.maxTokens,

@@ -122,3 +122,10 @@ echo "  ================================"
 echo "  Deja uninstalled."
 echo "  Claude Code will resume direct upstream connection."
 echo
+
+# Remove deja shim added by installer
+DEJA_LINK="$HOME/.local/bin/deja"
+if [[ -f "$DEJA_LINK" ]]; then
+  rm -f "$DEJA_LINK"
+  echo "  ✓  Removed deja command ($DEJA_LINK)"
+fi
