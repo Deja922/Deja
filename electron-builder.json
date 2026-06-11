@@ -14,5 +14,12 @@
   "win": {
     "target": "dir",
     "icon": "src/tray/icons/app-icon.png"
+  },
+  "mac": {
+    "target": [
+      { "target": "dmg", "arch": ["x64", "arm64"] }
+    ],
+    "icon": "src/tray/icons/app-icon.png",
+    "category": "public.app-category.utilities"
   }
 }

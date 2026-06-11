@@ -6,7 +6,8 @@ import { buildLongSummary, buildSingleModeSummary } from "./report.js";
 
 export async function runLongHarness(opts: LongEvalOptions): Promise<LongSessionReport> {
   const workflow = opts.workflow ?? "coding";
-  const turns = getTurns(opts.numRounds, workflow);
+  const dataset = opts.dataset ?? "loop";
+  const turns = getTurns(opts.numRounds, workflow, dataset);
   const mode = opts.mode ?? "both";
 
   console.log(`\n\x1b[1mLong-Session Eval Harness\x1b[0m — ${turns.length} rounds — ${workflow} workflow — ${mode === "both" ? "baseline + optimized" : mode + " only"}`);

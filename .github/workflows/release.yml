@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build && npm run build:tray
+
+      - name: Create release archives
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          STAGE=$(mktemp -d)
+
+          # Collect files into staging dir
+          cp package.json package-lock.json "$STAGE/"
+          cp LICENSE README.md "$STAGE/"
+          cp -r dist "$STAGE/"
+          cp -r config "$STAGE/"
+          cp -r installer "$STAGE/"
+          mkdir -p "$STAGE/scripts"
+          cp scripts/postinstall-check.cjs "$STAGE/scripts/"
+
+          # darwin-arm64
+          tar -czf "deja-${TAG}-darwin-arm64.tar.gz" -C "$STAGE" .
+
+          # darwin-x64
+          tar -czf "deja-${TAG}-darwin-x64.tar.gz" -C "$STAGE" .
+
+          # linux-x64
+          tar -czf "deja-${TAG}-linux-x64.tar.gz" -C "$STAGE" .
+
+          # win-x64 (zip)
+          (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/deja-${TAG}-win-x64.zip" .)
+
+          rm -rf "$STAGE"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            deja-*-darwin-arm64.tar.gz
+            deja-*-darwin-x64.tar.gz
+            deja-*-linux-x64.tar.gz
+            deja-*-win-x64.zip
+          generate_release_notes: true

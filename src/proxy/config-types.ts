@@ -9,7 +9,7 @@ export interface CompressionModeSettings {
 }
 
 export const COMPRESSION_MODES: Record<CompressionMode, CompressionModeSettings> = {
-  production:  { targetTokens: 4000, maxTokens: 8000, compressThreshold: 200 },
+  production:  { targetTokens: 5000, maxTokens: 8000, compressThreshold: 200 },
   balanced:    { targetTokens: 2500, maxTokens: 6000, compressThreshold: 150 },
   aggressive:  { targetTokens: 1200, maxTokens: 4000, compressThreshold: 100 },
   demo:        { targetTokens: 500,  maxTokens: 2000, compressThreshold: 50 },
@@ -45,7 +45,7 @@ export interface RuntimeConfig {
 
 export const DEFAULT_PIPELINE: PipelineSettings = {
   maxTokens: 8000,
-  targetTokens: 4000,
+  targetTokens: 5000,
   rankingThreshold: 0.3,
   memoryEnabled: false,
   memoryTopK: 5,

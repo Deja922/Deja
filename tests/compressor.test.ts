@@ -69,7 +69,7 @@ describe("summarizer", () => {
     ];
     const summary = summarizeBlock(messages);
     expect(summary.role).toBe("system");
-    expect(summary.content).toContain("Summarized 2 earlier messages");
+    expect(summary.content).toContain("BACKGROUND");
   });
 
   test("handles short messages gracefully", () => {

@@ -113,4 +113,5 @@ export interface LongEvalOptions {
   numRounds: number;
   mode: "baseline" | "optimized" | "both";
   workflow?: "coding" | "planning" | "agent";
+  dataset?: "loop" | "realistic";
 }

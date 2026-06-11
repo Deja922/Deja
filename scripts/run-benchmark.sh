@@ -1,6 +1,20 @@
-#!/bin/bash
-export ANTHROPIC_API_KEY="sk-d497bbc5c90d42f59f605fe05a808970"
-export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage:
+#   ANTHROPIC_API_KEY=... [ANTHROPIC_BASE_URL=...] ./scripts/run-benchmark.sh [workflow] [rounds] [mode]
+#
+# Never hardcode real keys in repository files.
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "ERROR: ANTHROPIC_API_KEY is required."
+  echo "Example:"
+  echo "  export ANTHROPIC_API_KEY='your-key'"
+  echo "  export ANTHROPIC_BASE_URL='https://api.deepseek.com/anthropic'   # optional"
+  exit 1
+fi
+
+: "${ANTHROPIC_BASE_URL:=https://api.anthropic.com}"
+export ANTHROPIC_BASE_URL
 
 WORKFLOW="${1:-coding}"
 ROUNDS="${2:-20}"

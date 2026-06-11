@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { spawn } from "child_process";
@@ -8,21 +8,22 @@ import type { RuntimeConfig, ProviderConfig, CompressionMode } from "../../proxy
 import { DEFAULT_CONFIG, COMPRESSION_MODES, resolveEnv } from "../../proxy/config-types.js";
 import type { UpstreamHealthResult } from "../../proxy/upstream.js";
 import { checkUpstreamHealth } from "../../proxy/upstream.js";
-import { writeManagedSettings, removeManagedSettings, isManagedSettingsActive, MANAGED_SETTINGS_PATH } from "../managed-settings.js";
+import { writeManagedSettings, removeManagedSettings, isManagedSettingsActive } from "../managed-settings.js";
+import { getCliReadCandidates, readFirstAvailableRuntimeConfig, readRuntimeConfig } from "@/config/deja-config-store.js";
 
-const DEFAULT_CONFIG_PATH = join(homedir(), ".deja", "config.json");
 const PID_FILE = join(homedir(), ".deja", "deja.pid");
 
-function loadConfigFile(path?: string): RuntimeConfig {
-  const configPath = path ?? DEFAULT_CONFIG_PATH;
-  if (!existsSync(configPath)) return DEFAULT_CONFIG;
-  try {
-    const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Partial<RuntimeConfig>;
-    return { ...DEFAULT_CONFIG, ...raw };
-  } catch {
-    process.stderr.write(`[deja] failed to parse config: ${configPath}\n`);
-    return DEFAULT_CONFIG;
+function loadConfigFile(path?: string): { config: RuntimeConfig; sourcePath?: string } {
+  if (path) {
+    const config = readRuntimeConfig(path);
+    if (config) return { config, sourcePath: path };
+    process.stderr.write(`[deja] failed to read config: ${path}. Using defaults.\n`);
+    return { config: DEFAULT_CONFIG };
   }
+
+  const loaded = readFirstAvailableRuntimeConfig(getCliReadCandidates());
+  if (loaded) return { config: loaded.config, sourcePath: loaded.path };
+  return { config: DEFAULT_CONFIG };
 }
 
 /** Get the effective provider config: config file > CLI upstream flag > env var > built-in default */
@@ -151,7 +152,8 @@ export async function start(opts: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const config = loadConfigFile(opts["config"] as string | undefined);
+  const loadedConfig = loadConfigFile(opts["config"] as string | undefined);
+  const config = loadedConfig.config;
 
   // Apply compression mode (CLI --target-tokens / --max-tokens override mode defaults)
   const mode = (opts["mode"] as string | undefined) ?? config.pipeline.mode;
@@ -217,9 +219,8 @@ export async function start(opts: Record<string, unknown>): Promise<void> {
   }
 
   // 3. Verify config
-  const configExists = existsSync(DEFAULT_CONFIG_PATH);
-  if (configExists) {
-    console.log(`  PASS  Config file found at ~/.deja/config.json`);
+  if (loadedConfig.sourcePath) {
+    console.log(`  PASS  Config file loaded from ${loadedConfig.sourcePath}`);
   } else {
     console.log(`  INFO  No config file. Run "deja setup" to create one.`);
   }

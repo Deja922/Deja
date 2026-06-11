@@ -1,32 +1,25 @@
 Business Source License 1.1
 
 Licensor: Deja922
-Licensed Work: Deja Context Engine
+Licensed Work: Deja Context Engine (all source code, binaries, scripts, and docs in this repository)
+Additional Use Grant:
+You may use the Licensed Work for personal use, education, evaluation, and internal testing.
+You may not offer, sell, host, sublicense, or redistribute the Licensed Work (or a substantially
+similar derivative) as a commercial product or commercial service without a separate commercial
+license from the Licensor.
 Change Date: 2030-01-01
 Change License: Apache License, Version 2.0
 
-Use Limitation:
-The Licensed Work may not be used for a "Commercial Use" without a separate
-commercial license from the Licensor. "Commercial Use" means use of the
-Licensed Work in a product or service that is offered for sale, licensed,
-or otherwise made available to third parties for a fee or other commercial
-consideration.
-
-Personal Use, open-source projects, and internal business use (where the
-Licensed Work is not itself a product being sold) are NOT "Commercial Use"
-and are permitted under this License.
-
-On the Change Date, the Licensed Work will be made available under the
-Change License (Apache 2.0), and commercial restrictions will no longer apply.
-
-For commercial licensing inquiries, contact the Licensor via GitHub:
-https://github.com/Deja922/Deja
-
 ---
 
-The Licensed Work is (c) 2026 Deja922
+This project is licensed under the Business Source License 1.1 (BUSL-1.1).
 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the above Use Limitation is respected.
+The full BUSL-1.1 license text is available at:
+https://mariadb.com/bsl11/
+
+If there is any conflict between this file's parameter section and a generic BUSL template,
+the parameter section in this file controls for this Licensed Work.
+
+Copyright (c) 2026 Deja922
 
 THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

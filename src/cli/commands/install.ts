@@ -3,6 +3,8 @@ import { join } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 import { MANAGED_SETTINGS_PATH } from "../managed-settings.js";
+import type { ProviderConfig, RuntimeConfig } from "../../proxy/config-types.js";
+import { writeRuntimeConfigToMirrors } from "@/config/deja-config-store.js";
 
 interface InstallOptions {
   port: number;
@@ -81,15 +83,26 @@ async function interactiveSetup(): Promise<{ upstream: string; apiKey: string; p
   return { upstream, apiKey, providerName };
 }
 
-function writeDejaConfig(port: number, upstream: string, apiKey: string, providerName: string): string {
-  const configDir = join(homedir(), ".deja");
-  const configPath = join(configDir, "config.json");
-
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
+function writeDejaConfig(
+  port: number,
+  upstream: string,
+  apiKey: string,
+  providerName: string,
+): { primaryPath: string; okPaths: string[]; failedPaths: Array<{ path: string; error?: string }> } {
+  let compatMode: ProviderConfig["compatMode"];
+  if (upstream.includes("/anthropic") || providerName === "anthropic" || providerName === "deepseek") {
+    compatMode = "anthropic";
+  } else if (upstream.includes("/v1") || providerName === "openai") {
+    compatMode = "openai";
   }
 
-  const config = {
+  const providerConfig: ProviderConfig = {
+    baseUrl: upstream,
+    ...(apiKey ? { apiKey } : {}),
+    ...(compatMode ? { compatMode } : {}),
+  };
+
+  const config: RuntimeConfig = {
     port,
     pipeline: {
       maxTokens: 8000,
@@ -99,24 +112,18 @@ function writeDejaConfig(port: number, upstream: string, apiKey: string, provide
       memoryTopK: 5,
       compressThreshold: 200,
     },
-    providers: {} as Record<string, { baseUrl: string; apiKey?: string; compatMode?: string }>,
+    providers: {},
     defaultProvider: providerName,
   };
 
-  config.providers[providerName] = { baseUrl: upstream };
-  if (apiKey) {
-    config.providers[providerName]!.apiKey = apiKey;
-  }
+  config.providers[providerName] = providerConfig;
 
-  // Detect compat mode from URL
-  if (upstream.includes("/anthropic") || providerName === "anthropic" || providerName === "deepseek") {
-    config.providers[providerName]!.compatMode = "anthropic";
-  } else if (upstream.includes("/v1") || providerName === "openai") {
-    config.providers[providerName]!.compatMode = "openai";
-  }
-
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-  return configPath;
+  const writeResults = writeRuntimeConfigToMirrors(config, { includeLegacySystemProfileIfExists: true });
+  const okPaths = writeResults.filter((r) => r.ok).map((r) => r.path);
+  const failedPaths = writeResults
+    .filter((r) => !r.ok)
+    .map((r) => (r.error ? { path: r.path, error: r.error } : { path: r.path }));
+  return { primaryPath: okPaths[0] ?? join(homedir(), ".deja", "config.json"), okPaths, failedPaths };
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -137,8 +144,22 @@ export async function install(opts: InstallOptions): Promise<void> {
   const { upstream, apiKey, providerName } = await interactiveSetup();
 
   // Step 2 — Write Deja config (~/.deja/config.json only, no settings.json touched)
-  const configPath = writeDejaConfig(port, upstream, apiKey, providerName);
-  console.log(`  配置已保存: ${configPath}`);
+  const writeResult = writeDejaConfig(port, upstream, apiKey, providerName);
+  if (writeResult.okPaths.length > 0) {
+    console.log(`  配置已保存: ${writeResult.primaryPath}`);
+    if (writeResult.okPaths.length > 1) {
+      for (const p of writeResult.okPaths.slice(1)) {
+        console.log(`  mirror: ${p}`);
+      }
+    }
+  } else {
+    console.log("  WARN 配置写入失败。");
+  }
+  if (writeResult.failedPaths.length > 0) {
+    for (const f of writeResult.failedPaths) {
+      console.log(`  WARN ${f.path}: ${f.error ?? "unknown error"}`);
+    }
+  }
   console.log("");
 
   // Step 3 — Summary

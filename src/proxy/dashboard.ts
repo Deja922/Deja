@@ -242,7 +242,7 @@ export function renderDashboard(s: SessionSnapshot): string {
   </div>
 
   <div class="footer">
-    Deja v0.1.0 &middot; Refresh to update &middot; Requests update in real time
+    Deja v0.1.1 &middot; Refresh to update &middot; Requests update in real time
   </div>
 </body>
 </html>`;

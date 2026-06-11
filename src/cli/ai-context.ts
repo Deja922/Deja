@@ -8,8 +8,8 @@ const program = new Command();
 
 program
   .name("ai-context")
-  .description("Context Engine proxy — baseline vs optimized AI workflow testing")
-  .version("0.1.0");
+  .description("Context Engine proxy - baseline vs optimized AI workflow testing")
+  .version("0.1.1");
 
 program
   .command("run <prompt>")
@@ -37,8 +37,8 @@ program
     await runProxy(prompt, {
       mode,
       ...(opts.context !== undefined ? { contextFile: opts.context } : {}),
-      maxTokens: parseInt(opts.maxTokens),
-      targetTokens: parseInt(opts.targetTokens),
+      maxTokens: parseInt(opts.maxTokens, 10),
+      targetTokens: parseInt(opts.targetTokens, 10),
       memoryEnabled: opts.memory,
       provider: opts.provider as "claude" | "openai" | "mock",
       model: opts.model,
@@ -53,7 +53,7 @@ program
     const tags = opts.tags?.split(",").map((t) => t.trim());
     const store = new MemoryStore();
     await store.store(text, tags);
-    console.log(`✓ Stored: "${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
+    console.log(`Stored: "${text.slice(0, 60)}${text.length > 60 ? "..." : ""}"`);
   });
 
 program
@@ -61,7 +61,7 @@ program
   .description("Clear all stored memories")
   .action(async () => {
     await new MemoryStore().clear();
-    console.log("✓ Memory cleared.");
+    console.log("Memory cleared.");
   });
 
 program.parse();

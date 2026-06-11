@@ -3,6 +3,8 @@ import { join } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 import { checkUpstreamHealth, isProviderReachable } from "../../proxy/upstream.js";
+import type { ProviderConfig, RuntimeConfig } from "../../proxy/config-types.js";
+import { writeRuntimeConfigToMirrors } from "@/config/deja-config-store.js";
 
 interface SetupOptions {
   port: number;
@@ -19,19 +21,26 @@ function ask(rl: ReturnType<typeof createInterface>, question: string): Promise<
 
 // ── Deja config writer ──────────────────────────────────────────────────────
 
-function writeDejaConfig(port: number, upstream: string, apiKey: string, providerName: string): string {
-  const configDir = join(homedir(), ".deja");
-  const configPath = join(configDir, "config.json");
-  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
-
-  let compatMode: string | undefined;
+function writeDejaConfig(
+  port: number,
+  upstream: string,
+  apiKey: string,
+  providerName: string,
+): { primaryPath: string; okPaths: string[]; failedPaths: Array<{ path: string; error?: string }> } {
+  let compatMode: ProviderConfig["compatMode"];
   if (upstream.includes("/anthropic") || providerName === "anthropic" || providerName === "deepseek") {
     compatMode = "anthropic";
   } else if (upstream.includes("/v1") || providerName === "openai") {
     compatMode = "openai";
   }
 
-  const config = {
+  const providerConfig: ProviderConfig = {
+    baseUrl: upstream,
+    ...(apiKey ? { apiKey } : {}),
+    ...(compatMode ? { compatMode } : {}),
+  };
+
+  const config: RuntimeConfig = {
     port,
     pipeline: {
       maxTokens: 8000,
@@ -42,17 +51,17 @@ function writeDejaConfig(port: number, upstream: string, apiKey: string, provide
       compressThreshold: 200,
     },
     providers: {
-      [providerName]: {
-        baseUrl: upstream,
-        ...(apiKey ? { apiKey } : {}),
-        ...(compatMode ? { compatMode } : {}),
-      },
-    } as Record<string, unknown>,
+      [providerName]: providerConfig,
+    },
     defaultProvider: providerName,
   };
 
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-  return configPath;
+  const writeResults = writeRuntimeConfigToMirrors(config, { includeLegacySystemProfileIfExists: true });
+  const okPaths = writeResults.filter((r) => r.ok).map((r) => r.path);
+  const failedPaths = writeResults
+    .filter((r) => !r.ok)
+    .map((r) => (r.error ? { path: r.path, error: r.error } : { path: r.path }));
+  return { primaryPath: okPaths[0] ?? join(homedir(), ".deja", "config.json"), okPaths, failedPaths };
 }
 
 // ── Claude Code patching ────────────────────────────────────────────────────
@@ -238,8 +247,22 @@ export async function setup(opts: SetupOptions): Promise<void> {
 
   // ── Step 3: Save config ───────────────────────────────────────────────
   console.log("  ── 第 3 步：保存配置 ──");
-  const configPath = writeDejaConfig(port, upstream, apiKey, providerName);
-  console.log(`  ${"OK".padEnd(6)} 配置已保存: ${configPath}`);
+  const writeResult = writeDejaConfig(port, upstream, apiKey, providerName);
+  if (writeResult.okPaths.length > 0) {
+    console.log(`  ${"OK".padEnd(6)} 配置已保存: ${writeResult.primaryPath}`);
+    if (writeResult.okPaths.length > 1) {
+      for (const p of writeResult.okPaths.slice(1)) {
+        console.log(`         mirror: ${p}`);
+      }
+    }
+  } else {
+    console.log(`  WARN   配置写入失败`);
+  }
+  if (writeResult.failedPaths.length > 0) {
+    for (const f of writeResult.failedPaths) {
+      console.log(`         fail: ${f.path} (${f.error ?? "unknown error"})`);
+    }
+  }
   console.log("");
 
   // ── Step 4: Validate upstream ─────────────────────────────────────────

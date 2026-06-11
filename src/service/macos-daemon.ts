@@ -1,13 +1,10 @@
-// macOS launchd LaunchAgent manager.
-// Installs Deja as a user-level launch agent (starts on login, no root needed).
-// Crash recovery handled via KeepAlive/Crashed + ThrottleInterval.
-
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { removeManagedSettings } from "../cli/managed-settings.js";
+import { getUserConfigPath } from "@/config/deja-config-store.js";
 
 const LABEL = "com.deja.context-engine";
 const PLIST_PATH = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
@@ -17,32 +14,17 @@ function getServiceScript(): string {
   return join(__filename, "..", "service-entry.js");
 }
 
-function getApiKey(): string {
-  try {
-    const configPath = join(homedir(), ".deja", "config.json");
-    const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    const providers = raw["providers"] as Record<string, { apiKey?: string }> | undefined;
-    const defaultProvider = raw["defaultProvider"] as string | undefined;
-    const provider = defaultProvider
-      ? providers?.[defaultProvider]
-      : Object.values(providers ?? {})[0];
-    return provider?.apiKey ?? "";
-  } catch {
-    return "";
-  }
-}
-
 function getUserId(): number {
-  // process.getuid is POSIX-only (not available on Windows)
   return (process as { getuid?: () => number }).getuid?.() ?? 501;
 }
 
-function buildPlist(nodeExec: string, scriptPath: string, apiKey: string): string {
+function getConfigPath(): string {
+  return process.env["DEJA_CONFIG_PATH"] ?? getUserConfigPath();
+}
+
+function buildPlist(nodeExec: string, scriptPath: string, configPath: string): string {
   const home = homedir();
   const logPath = join(home, ".deja", "deja.log");
-  const apiKeyEntry = apiKey
-    ? `        <key>ANTHROPIC_API_KEY</key>\n        <string>${apiKey}</string>\n`
-    : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -61,7 +43,9 @@ function buildPlist(nodeExec: string, scriptPath: string, apiKey: string): strin
         <string>1</string>
         <key>HOME</key>
         <string>${home}</string>
-${apiKeyEntry}    </dict>
+        <key>DEJA_CONFIG_PATH</key>
+        <string>${configPath}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -80,34 +64,37 @@ ${apiKeyEntry}    </dict>
 `;
 }
 
+export function isDaemonInstalled(): boolean {
+  return existsSync(PLIST_PATH);
+}
+
 export function registerDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
       const launchAgentsDir = join(homedir(), "Library", "LaunchAgents");
       if (!existsSync(launchAgentsDir)) mkdirSync(launchAgentsDir, { recursive: true });
 
-      // Ensure log directory exists
       const logDir = join(homedir(), ".deja");
       if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
       const nodeExec = process.execPath;
       const scriptPath = getServiceScript();
-      const apiKey = getApiKey();
+      const configPath = getConfigPath();
 
-      writeFileSync(PLIST_PATH, buildPlist(nodeExec, scriptPath, apiKey), "utf-8");
-      console.log(`[deja-daemon] plist written → ${PLIST_PATH}`);
+      writeFileSync(PLIST_PATH, buildPlist(nodeExec, scriptPath, configPath), "utf-8");
+      console.log(`[deja-daemon] plist written -> ${PLIST_PATH}`);
 
-      // Unload any existing instance first
       const uid = getUserId();
       try {
         execSync(`launchctl bootout gui/${uid} "${PLIST_PATH}" 2>/dev/null`, { stdio: "pipe" });
       } catch {
         try {
           execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null`, { stdio: "pipe" });
-        } catch { /* not loaded */ }
+        } catch {
+          // not loaded
+        }
       }
 
-      // Load the agent (macOS 10.13+ prefers bootstrap)
       try {
         execSync(`launchctl bootstrap gui/${uid} "${PLIST_PATH}"`, { stdio: "pipe" });
       } catch {
@@ -120,6 +107,16 @@ export function registerDaemon(): Promise<void> {
       reject(err);
     }
   });
+}
+
+export async function restartDaemonIfInstalled(): Promise<{ restarted: boolean; error?: string }> {
+  if (!isDaemonInstalled()) return { restarted: false };
+  try {
+    await registerDaemon();
+    return { restarted: true };
+  } catch (err) {
+    return { restarted: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function unregisterDaemon(): Promise<void> {
@@ -137,12 +134,14 @@ export function unregisterDaemon(): Promise<void> {
       } catch {
         try {
           execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null`, { stdio: "pipe" });
-        } catch { /* already unloaded */ }
+        } catch {
+          // already unloaded
+        }
       }
 
       unlinkSync(PLIST_PATH);
       removeManagedSettings();
-      console.log(`[deja-daemon] LaunchAgent removed`);
+      console.log("[deja-daemon] LaunchAgent removed");
       resolve();
     } catch (err) {
       reject(err);

@@ -1016,4 +1016,157 @@ describe("startProxy follow mode (settings.json)", () => {
     await close(upstream);
     rmSync(settingsPath);
   });
+
+  test("keeps OpenAI /v1/responses on static provider while Claude follows settings.json", async () => {
+    let claudeHits = 0;
+    let codexPath = "";
+    let codexAuth = "";
+
+    const claudeUpstream = http.createServer(async (req, res) => {
+      claudeHits += 1;
+      await readRequest(req);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "msg_claude", type: "message", content: [] }));
+    });
+
+    const codexUpstream = http.createServer(async (req, res) => {
+      codexPath = req.url ?? "";
+      codexAuth = String(req.headers["x-api-key"] ?? "");
+      await readRequest(req);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "resp_test", object: "response", output: [] }));
+    });
+
+    const claudePort = await listen(claudeUpstream);
+    const codexPort = await listen(codexUpstream);
+    const settingsPath = tmpSettings({
+      env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${claudePort}` },
+    });
+
+    const proxy = startProxy({
+      port: 0,
+      verbose: false,
+      claudeSettingsPath: settingsPath,
+      config: {
+        port: 0,
+        pipeline: {
+          maxTokens: 8000,
+          targetTokens: 4000,
+          rankingThreshold: 0.3,
+          memoryEnabled: false,
+          memoryTopK: 5,
+          compressThreshold: 200,
+        },
+        providers: {
+          codex: {
+            baseUrl: `http://127.0.0.1:${codexPort}`,
+            compatMode: "openai",
+          },
+        },
+        defaultProvider: "codex",
+      },
+    });
+    const proxyPort = await new Promise<number>((resolve) => {
+      proxy.on("listening", () => {
+        const address = proxy.address();
+        if (typeof address === "object" && address) resolve(address.port);
+      });
+    });
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "codex-user-key" },
+      body: JSON.stringify({
+        model: "gpt-5.3-codex",
+        input: "Ping",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(codexPath).toBe("/v1/responses");
+    expect(codexAuth).toBe("codex-user-key");
+    expect(claudeHits).toBe(0);
+
+    await close(proxy);
+    await close(claudeUpstream);
+    await close(codexUpstream);
+    rmSync(settingsPath);
+  });
+
+  test("routes OpenAI /v1/responses to an OpenAI-compatible provider even when default is anthropic", async () => {
+    let claudeHits = 0;
+    let codexPath = "";
+
+    const claudeUpstream = http.createServer(async (req, res) => {
+      claudeHits += 1;
+      await readRequest(req);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "msg_claude", type: "message", content: [] }));
+    });
+
+    const codexUpstream = http.createServer(async (req, res) => {
+      codexPath = req.url ?? "";
+      await readRequest(req);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "resp_test", object: "response", output: [] }));
+    });
+
+    const claudePort = await listen(claudeUpstream);
+    const codexPort = await listen(codexUpstream);
+    const settingsPath = tmpSettings({
+      env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${claudePort}` },
+    });
+
+    const proxy = startProxy({
+      port: 0,
+      verbose: false,
+      claudeSettingsPath: settingsPath,
+      config: {
+        port: 0,
+        pipeline: {
+          maxTokens: 8000,
+          targetTokens: 4000,
+          rankingThreshold: 0.3,
+          memoryEnabled: false,
+          memoryTopK: 5,
+          compressThreshold: 200,
+        },
+        providers: {
+          claude: {
+            baseUrl: `http://127.0.0.1:${claudePort}`,
+            compatMode: "anthropic",
+          },
+          codex: {
+            baseUrl: `http://127.0.0.1:${codexPort}`,
+            compatMode: "openai",
+          },
+        },
+        defaultProvider: "claude",
+      },
+    });
+    const proxyPort = await new Promise<number>((resolve) => {
+      proxy.on("listening", () => {
+        const address = proxy.address();
+        if (typeof address === "object" && address) resolve(address.port);
+      });
+    });
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "codex-user-key" },
+      body: JSON.stringify({
+        model: "gpt-5.3-codex",
+        input: "Ping",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(codexPath).toBe("/v1/responses");
+    expect(claudeHits).toBe(0);
+
+    await close(proxy);
+    await close(claudeUpstream);
+    await close(codexUpstream);
+    rmSync(settingsPath);
+  });
 });

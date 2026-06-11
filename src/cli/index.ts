@@ -9,8 +9,8 @@ const program = new Command();
 
 program
   .name("ctx")
-  .description("AI Context Engine — compress, rank, and manage AI context")
-  .version("0.1.0");
+  .description("AI Context Engine - compress, rank, and manage AI context")
+  .version("0.1.1");
 
 program
   .command("compress")
@@ -22,14 +22,14 @@ program
   .action(async (file: string, opts: { maxTokens: string; targetTokens: string; memory?: boolean }) => {
     const raw = JSON.parse(readFileSync(file, "utf-8")) as Context;
     const config = await loadConfig({
-      maxTokens: parseInt(opts.maxTokens),
-      targetTokens: parseInt(opts.targetTokens),
+      maxTokens: parseInt(opts.maxTokens, 10),
+      targetTokens: parseInt(opts.targetTokens, 10),
       memoryEnabled: opts.memory ?? false,
     });
     const pipeline = new Pipeline();
     const result = await pipeline.run(raw, config);
 
-    console.log("\n── Result ──────────────────────────────────────");
+    console.log("\n=== Result ===");
     console.log(`Messages:    ${result.context.messages.length} (was ${raw.messages.length})`);
     console.log(`Tokens:      ${result.stats.outputTokens} (was ${result.stats.originalTokens})`);
     console.log(`Ratio:       ${(result.stats.compressionRatio * 100).toFixed(1)}%`);
@@ -37,7 +37,7 @@ program
     console.log(`Summarized:  ${result.stats.messagesSummarized}`);
     console.log(`Memory hits: ${result.stats.memoryHits}`);
     console.log(`Duration:    ${result.stats.durationMs}ms`);
-    console.log("────────────────────────────────────────────────\n");
+    console.log("=============\n");
   });
 
 program
@@ -49,7 +49,7 @@ program
     const tags = opts.tags?.split(",").map((t) => t.trim());
     const store = new MemoryStore();
     await store.store(text, tags);
-    console.log(`✓ Stored in memory: "${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
+    console.log(`Stored in memory: "${text.slice(0, 60)}${text.length > 60 ? "..." : ""}"`);
   });
 
 program
@@ -58,7 +58,7 @@ program
   .action(async () => {
     const store = new MemoryStore();
     await store.clear();
-    console.log("✓ Memory cleared.");
+    console.log("Memory cleared.");
   });
 
 program.parse();

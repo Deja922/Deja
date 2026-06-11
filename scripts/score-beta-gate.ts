@@ -58,26 +58,31 @@ function scoreEvalReport(report: EvalReport): void {
     ? pass("Compression success rate", pct(m1), "≥97%")
     : fail("Compression success rate", pct(m1), "≥97%");
 
-  // Metric 2: off-topic — qualityScore < 4 out of 10 treated as off-topic
-  const offTopic = optimized.filter(r => r.optimized.qualityScore < 4).length;
-  const m2 = (offTopic / total) * 100;
-  m2 <= THRESHOLDS.offTopicRate.max
-    ? pass("Off-topic / wrong-answer rate", pct(m2), "≤2%")
-    : fail("Off-topic / wrong-answer rate", pct(m2), "≤2%");
+  // Metric 2: off-topic — only meaningful when judge is enabled; heuristic quality ≠ off-topic
+  if (report.judgeEnabled) {
+    const offTopic = optimized.filter(r => r.optimized.qualityScore < 4).length;
+    const m2 = (offTopic / total) * 100;
+    m2 <= THRESHOLDS.offTopicRate.max
+      ? pass("Off-topic / wrong-answer rate", pct(m2), "≤2%")
+      : fail("Off-topic / wrong-answer rate", pct(m2), "≤2%");
+  } else {
+    na("Off-topic / wrong-answer rate", "requires --judge flag; heuristic qualityScore ≠ off-topic");
+  }
 
-  // Metric 3: repetition — not directly available in EvalReport
-  na("Repetition rate", "requires long-session report or manual review");
+  // Metric 3: repetition — no dedicated field in EvalReport
+  na("Repetition rate", "no repetition field in EvalReport; requires LongSessionReport + manual review");
 
-  // Metric 4: auto-bypass — compressionRatio ≥ 0.75 in pipelineStats
+  // Metric 4: auto-bypass — check for explicit bypass:true in pipelineStats
   const withStats = optimized.filter(r => r.pipelineStats);
-  if (withStats.length) {
-    const autoBypass = withStats.filter(r => (r.pipelineStats!.compressionRatio ?? 0) >= 0.75).length;
+  const hasBypassField = withStats.some(r => "bypass" in (r.pipelineStats as Record<string, unknown>));
+  if (hasBypassField) {
+    const autoBypass = withStats.filter(r => (r.pipelineStats as Record<string, unknown>)["bypass"] === true).length;
     const m4 = (autoBypass / withStats.length) * 100;
     m4 <= THRESHOLDS.autoBypassRate.max
       ? pass("Auto-bypass trigger rate", pct(m4), "≤15%")
       : fail("Auto-bypass trigger rate", pct(m4), "≤15%");
   } else {
-    na("Auto-bypass trigger rate", "no pipelineStats in results");
+    na("Auto-bypass trigger rate", "no bypass field in pipelineStats; eval harness runs pipeline directly");
   }
 
   // Metric 5: token savings
@@ -114,29 +119,31 @@ function scoreLongSessionReport(report: LongSessionReport): void {
     ? pass("Compression success rate", pct(m1), "≥97%")
     : fail("Compression success rate", pct(m1), "≥97%");
 
-  // Metric 2: off-topic — qualityScore < 4
-  const offTopic = rounds.filter(r => r.qualityScore < 4).length;
-  const m2 = (offTopic / total) * 100;
-  m2 <= THRESHOLDS.offTopicRate.max
-    ? pass("Off-topic / wrong-answer rate", pct(m2), "≤2%")
-    : fail("Off-topic / wrong-answer rate", pct(m2), "≤2%");
+  // Metric 2: off-topic — only meaningful when judge is enabled
+  if (report.judgeEnabled) {
+    const offTopic = rounds.filter(r => r.qualityScore < 4).length;
+    const m2 = (offTopic / total) * 100;
+    m2 <= THRESHOLDS.offTopicRate.max
+      ? pass("Off-topic / wrong-answer rate", pct(m2), "≤2%")
+      : fail("Off-topic / wrong-answer rate", pct(m2), "≤2%");
+  } else {
+    na("Off-topic / wrong-answer rate", "requires --judge flag; heuristic qualityScore ≠ off-topic");
+  }
 
-  // Metric 3: repetition — avgRedundancyRate from metrics (0–1 → %)
-  const m3 = (opt.metrics.avgRedundancyRate ?? 0) * 100;
-  m3 <= THRESHOLDS.repetitionRate.max
-    ? pass("Repetition rate", pct(m3), "≤3%")
-    : fail("Repetition rate", pct(m3), "≤3%");
+  // Metric 3: repetition — avgRedundancyRate measures history redundancy, not output repetition
+  na("Repetition rate", "avgRedundancyRate ≠ output repetition; requires LLM judge or manual review");
 
-  // Metric 4: auto-bypass — rounds where compressionRatio ≥ 0.75
+  // Metric 4: auto-bypass — check for explicit bypass:true in pipelineStats
   const withStats = rounds.filter(r => r.pipelineStats);
-  if (withStats.length) {
-    const autoBypass = withStats.filter(r => (r.pipelineStats!.compressionRatio ?? 0) >= 0.75).length;
+  const hasBypassField = withStats.some(r => "bypass" in (r.pipelineStats as Record<string, unknown>));
+  if (hasBypassField) {
+    const autoBypass = withStats.filter(r => (r.pipelineStats as Record<string, unknown>)["bypass"] === true).length;
     const m4 = (autoBypass / withStats.length) * 100;
     m4 <= THRESHOLDS.autoBypassRate.max
       ? pass("Auto-bypass trigger rate", pct(m4), "≤15%")
       : fail("Auto-bypass trigger rate", pct(m4), "≤15%");
   } else {
-    na("Auto-bypass trigger rate", "no pipelineStats in rounds");
+    na("Auto-bypass trigger rate", "no bypass field in pipelineStats; eval harness runs pipeline directly");
   }
 
   // Metric 5: token savings

@@ -5,8 +5,8 @@ const program = new Command();
 
 program
   .name("deja")
-  .description("Deja Context Engine — compress, deduplicate, and stabilize LLM context")
-  .version("0.1.0");
+  .description("Deja Context Engine - compress, deduplicate, and stabilize LLM context")
+  .version("0.1.2");
 
 program
   .command("setup")
@@ -16,6 +16,23 @@ program
   .action(async (opts: { port: string; key?: string }) => {
     const { setup } = await import("./commands/setup.js");
     await setup({ port: parseInt(opts.port, 10), ...(opts.key ? { key: opts.key } : {}) });
+  });
+
+program
+  .command("key:update")
+  .description("Rotate API key and sync runtime config across all mirrors")
+  .requiredOption("--key <key>", "New API key")
+  .option("--upstream <url>", "Optional upstream URL override")
+  .option("--provider <name>", "Optional provider name override")
+  .option("--skip-health-check", "Skip upstream health check before writing")
+  .action(async (opts: { key: string; upstream?: string; provider?: string; skipHealthCheck?: boolean }) => {
+    const { keyUpdate } = await import("./commands/key-update.js");
+    await keyUpdate({
+      key: opts.key,
+      ...(opts.upstream ? { upstream: opts.upstream } : {}),
+      ...(opts.provider ? { provider: opts.provider } : {}),
+      skipHealthCheck: Boolean(opts.skipHealthCheck),
+    });
   });
 
 program
@@ -88,6 +105,39 @@ program
   });
 
 program
+  .command("bypass <state>")
+  .description("Pause/resume compression without stopping the proxy (on | off)")
+  .option("--port <number>", "Proxy port", "9090")
+  .action(async (state: string, opts: { port: string }) => {
+    const port = parseInt(opts.port, 10);
+    const normalized = state.toLowerCase();
+    if (normalized !== "on" && normalized !== "off") {
+      console.error("Invalid state. Use: deja bypass on | deja bypass off");
+      process.exit(1);
+    }
+
+    const endpoint = normalized === "on" ? "/deja/bypass" : "/deja/resume";
+    const url = `http://127.0.0.1:${port}${endpoint}`;
+
+    try {
+      const resp = await fetch(url, { method: "POST" });
+      if (!resp.ok) {
+        console.error(`Failed to set bypass (${resp.status} ${resp.statusText})`);
+        process.exit(1);
+      }
+
+      if (normalized === "on") {
+        console.log("Compression paused (bypass enabled).");
+      } else {
+        console.log("Compression resumed.");
+      }
+    } catch (err) {
+      console.error(`Cannot reach Deja on port ${port}: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command("logs")
   .description("Show proxy logs (compression events, upstream failures, retries)")
   .option("--port <number>", "Proxy port", "9090")
@@ -104,23 +154,120 @@ program
 
 program
   .command("service:install")
-  .description("Register Deja as a Windows Service (auto-start on boot). Run as Administrator.")
+  .description("Register Deja as a system daemon (Windows Service / macOS LaunchAgent). Run as Administrator on Windows.")
   .action(async () => {
-    const { registerService } = await import("../service/windows-service.js");
-    await registerService();
+    if (process.platform === "win32") {
+      const { registerService } = await import("../service/windows-service.js");
+      await registerService();
+    } else if (process.platform === "darwin") {
+      const { registerDaemon } = await import("../service/macos-daemon.js");
+      await registerDaemon();
+    } else {
+      console.error("service:install is not yet supported on this platform. Use `deja start --daemon` instead.");
+      process.exit(1);
+    }
   });
 
 program
   .command("service:remove")
-  .description("Remove the Deja Windows Service and clean up routing config.")
+  .description("Remove the Deja system daemon and clean up routing config.")
   .action(async () => {
-    const { unregisterService } = await import("../service/windows-service.js");
     const { removeManagedSettings } = await import("./managed-settings.js");
     const cleanup = removeManagedSettings();
     if (cleanup.wasPresent) {
       console.log("  Removed managed-settings.json");
     }
-    await unregisterService();
+    if (process.platform === "win32") {
+      const { unregisterService } = await import("../service/windows-service.js");
+      await unregisterService();
+    } else if (process.platform === "darwin") {
+      const { unregisterDaemon } = await import("../service/macos-daemon.js");
+      await unregisterDaemon();
+    } else {
+      console.error("service:remove is not yet supported on this platform.");
+      process.exit(1);
+    }
+  });
+
+program
+  .command("tools:list")
+  .description("List detected AI tools and their Deja routing status")
+  .option("--port <number>", "Proxy port", "9090")
+  .action(async (opts: { port: string }) => {
+    const { toolsList } = await import("./commands/tools.js");
+    toolsList(parseInt(opts.port, 10));
+  });
+
+program
+  .command("tools:install <tool>")
+  .description("Configure tool to route via Deja (cursor | continue | codex | all)")
+  .option("--port <number>", "Proxy port", "9090")
+  .action(async (tool: string, opts: { port: string }) => {
+    const { toolsInstall } = await import("./commands/tools.js");
+    toolsInstall(tool, parseInt(opts.port, 10));
+  });
+
+program
+  .command("license:activate <key>")
+  .description("Activate Deja with a license key")
+  .action(async (key: string) => {
+    const { validateKey, saveLicense } = await import("./license.js");
+    const status = validateKey(key);
+    if (!status.valid) {
+      if (status.reason === "invalid key format") {
+        console.error("  ERROR  Invalid key format. Key should start with DEJA-.");
+      } else if (status.reason === "key expired") {
+        const exp = status.expiry ? new Date(status.expiry).toLocaleDateString("zh-CN") : "unknown";
+        console.error(`  ERROR  Key expired (expiry: ${exp}).`);
+      } else if (status.reason === "signature invalid") {
+        console.error("  ERROR  Invalid key signature. Key may be tampered or for another version.");
+      } else {
+        console.error(`  ERROR  Activation failed: ${status.reason}`);
+      }
+      process.exit(1);
+    }
+    saveLicense(key);
+    const expiry = new Date(status.expiry!).toLocaleDateString("zh-CN");
+    console.log("  OK  License activated");
+    console.log(`     Tier   : ${(status.tier ?? "").toUpperCase()}`);
+    console.log(`     Email  : ${status.email}`);
+    console.log(`     Expiry : ${expiry}`);
+    console.log("     Note  : Restart Deja service if it is currently running.");
+  });
+
+program
+  .command("license:redeem <code>")
+  .description("Redeem purchase/trial code and activate license automatically")
+  .option("--endpoint <url>", "Redeem API endpoint (default: DEJA_LICENSE_REDEEM_ENDPOINT or built-in)")
+  .option("--email <email>", "Optional account email for redeem verification")
+  .option("--phone <phone>", "Optional account phone for redeem verification")
+  .option("--device-id <id>", "Optional explicit device id (advanced)")
+  .option("--timeout-ms <ms>", "HTTP timeout in milliseconds", "12000")
+  .action(async (code: string, opts: { endpoint?: string; email?: string; phone?: string; deviceId?: string; timeoutMs: string }) => {
+    const { redeemLicense } = await import("./commands/license-redeem.js");
+    const parsedTimeout = parseInt(opts.timeoutMs, 10);
+    await redeemLicense(code, {
+      ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
+      ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.phone ? { phone: opts.phone } : {}),
+      ...(opts.deviceId ? { deviceId: opts.deviceId } : {}),
+      timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 12000,
+    });
+  });
+
+program
+  .command("license:status")
+  .description("Show current license status")
+  .action(async () => {
+    const { getLicenseStatus } = await import("./license.js");
+    const status = getLicenseStatus();
+    if (!status.valid) {
+      console.log(`  License: FREE (${status.reason})`);
+    } else {
+      const expiry = new Date(status.expiry!).toLocaleDateString();
+      console.log(`  License: ${(status.tier ?? "").toUpperCase()} - ${status.email} (expires ${expiry})`);
+    }
   });
 
 program.parse();
+

@@ -1,18 +1,17 @@
 {
   "name": "deja-context",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "license": "BUSL-1.1",
-  "description": "Stop AI coding sessions from bloating — compress, deduplicate, and stabilize LLM context",
+  "description": "Stop AI coding sessions from bloating - compress, deduplicate, and stabilize LLM context",
   "type": "module",
   "main": "./dist/core/index.js",
   "bin": {
-    "deja": "./dist/cli/deja.js"
+    "deja": "dist/cli/deja.js"
   },
   "files": [
     "dist/",
     "config/",
-    "scripts/",
-    "src/tray/icons/",
+    "scripts/postinstall-check.cjs",
     "LICENSE",
     "README.md"
   ],
@@ -22,23 +21,25 @@
     "build:tray": "tsc --project tsconfig.tray.json",
     "package:tray": "electron-builder --config electron-builder.json",
     "build:all": "npm run build && npm run build:tray",
-    "service:install": "node dist/service/windows-service.js register",
-    "service:remove": "node dist/service/windows-service.js uninstall",
-    "prepublishOnly": "npm run build && npm test",
+    "service:install": "node dist/cli/deja.js service:install",
+    "service:remove": "node dist/cli/deja.js service:remove",
+    "guard:protect": "node scripts/assert-protection-guardrails.cjs",
+    "prepublishOnly": "npm run guard:protect && npm run build && npm test",
     "postinstall": "node scripts/postinstall-check.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "eval": "tsx src/cli/eval.ts",
     "eval:long": "tsx src/cli/long-eval.ts",
-    "demo": "tsx src/cli/demo.ts"
+    "demo": "tsx src/cli/demo.ts",
+    "beta:score": "tsx scripts/score-beta-gate.ts"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Deja922/Deja"
+    "url": "git+https://github.com/Deja922/Deja.git"
   },
   "bugs": {
     "url": "https://github.com/Deja922/Deja/issues"
@@ -57,8 +58,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
     "commander": "^12.1.0",
-    "node-windows": "^1.0.0-beta.8",
     "openai": "^4.47.1"
+  },
+  "optionalDependencies": {
+    "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

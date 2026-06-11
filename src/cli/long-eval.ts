@@ -16,9 +16,10 @@ program
   .option("-m, --model <name>", "Model name", "claude-sonnet-4-6")
   .option("--mode <mode>", "Run mode: baseline | optimized | both", "both")
   .option("--max-tokens <n>", "Max tokens for pipeline", "8000")
-  .option("--target-tokens <n>", "Target tokens after compression", "3000")
-  .option("--rounds <n>", "Number of rounds to run (max 20, default 20)", "20")
+  .option("--target-tokens <n>", "Target tokens after compression", "4500")
+  .option("--rounds <n>", "Number of rounds to run (max 60, default 20)", "20")
   .option("--workflow <name>", "Workflow: coding | planning | agent", "coding")
+  .option("--dataset <name>", "Turn dataset: loop (cycling standard turns) | realistic", "loop")
   .option("--judge", "Use Claude Haiku to judge output quality", false)
   .option("-o, --output <path>", "Save full report as JSON")
   .option("-v, --verbose", "Print each round's response snippet", false)
@@ -32,19 +33,21 @@ const raw = program.opts<{
   targetTokens: string;
   rounds: string;
   workflow: string;
+  dataset: string;
   judge: boolean;
   output?: string;
   verbose: boolean;
 }>();
 
-const opts: LongEvalOptions = {
+const opts: LongEvalOptions & { dataset: "loop" | "realistic" } = {
   provider: raw.provider as LongEvalOptions["provider"],
   model: raw.model,
   mode: (raw.mode as LongEvalOptions["mode"]) ?? "both",
   maxTokens: parseInt(raw.maxTokens, 10),
   targetTokens: parseInt(raw.targetTokens, 10),
-  numRounds: Math.min(20, Math.max(1, parseInt(raw.rounds, 10))),
+  numRounds: Math.min(60, Math.max(1, parseInt(raw.rounds, 10))),
   workflow: (["coding", "planning", "agent"].includes(raw.workflow) ? raw.workflow : "coding") as "coding" | "planning" | "agent",
+  dataset: raw.dataset === "realistic" ? "realistic" : "loop",
   judgeEnabled: raw.judge,
   ...(raw.output !== undefined ? { outputFile: raw.output } : {}),
   verbose: raw.verbose,

@@ -5,9 +5,14 @@ dist-electron/
 *.js.map
 .env
 .env.local
+.env.*
+!.env.example
 
 # Eval logs (contain API responses, can be large)
 ~/.context-engine/
+reports/
+logs/
+*.log
 
 # OS
 .DS_Store
@@ -23,6 +28,11 @@ Thumbs.db:encryptable
 demo.cast
 *.cast
 
+# License signing keys (private key lives in ~/.deja/keys/, not here — but just in case)
+*.pem
+keys/
+*.key
+
 # Temp / build artifacts
 gen-icons.cjs
 agg.exe
@@ -30,3 +40,10 @@ fix_join.py
 plan-text.txt
 demo.tape
 *.output
+
+# Local dev / private tools
+start-deja.ps1
+ttyd.exe
+test-request.json
+test.tape
+PROFILE_README.md

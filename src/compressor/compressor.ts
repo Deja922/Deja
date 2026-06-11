@@ -23,7 +23,7 @@ export class Compressor implements ICompressor {
 
     let messages = scoreMessages(ctx.messages);
 
-    // Pass 2: drop messages below ranking threshold, protecting system + last 4
+    // Pass 2: drop messages below ranking threshold, protecting system + last 6
     // Only drops LLM-bound messages (SYSTEM_LOGS/TELEMETRY already stripped above)
     messages = dropBelowThreshold(messages, config.rankingThreshold);
 
@@ -76,7 +76,7 @@ function dropNearDuplicates(messages: Message[]): Message[] {
  * Always keeps: system messages + the last `keepTail` messages.
  */
 function dropBelowThreshold(messages: Message[], threshold: number): Message[] {
-  const keepTail = 4;
+  const keepTail = 10;
   const body = messages.slice(0, Math.max(0, messages.length - keepTail));
   const tail = messages.slice(-keepTail);
 
@@ -102,23 +102,52 @@ function summarizeOldMessages(ctx: Context, targetTokens: number): Context {
       && m.category !== "TELEMETRY"
   );
 
-  // How many old messages to fold into a summary?
-  // Start by summarising bottom 50% of non-system messages
-  const summarizeCount = Math.max(1, Math.floor(nonSystem.length * 0.5));
-  const toSummarize = nonSystem.slice(0, summarizeCount);
-  const toKeep = nonSystem.slice(summarizeCount);
+  // Always keep at least the last 8 messages (≈4 full exchanges) verbatim.
+  // Short reference questions ("现在不会重复回答了？") need several preceding
+  // turns to be interpretable — too small a keepTail means the LLM falls back
+  // to the BACKGROUND summary instead, causing topic confusion.
+  const minKeep = Math.min(8, nonSystem.length);
+  let actualSummarize = Math.min(
+    Math.max(1, Math.floor(nonSystem.length * 0.5)),
+    nonSystem.length - minKeep
+  );
+
+  // Nothing old enough to summarise — return as-is.
+  if (actualSummarize <= 0) return ctx;
+
+  // Align the split to the nearest user/assistant boundary so toKeep always
+  // starts with a user message. The Anthropic API rejects a messages array
+  // that starts with an assistant — and a summary block gets dropped in
+  // contextToRequest (it has no matching record), so an orphaned assistant
+  // at the front would reach the API unchanged.
+  while (actualSummarize > 0 && nonSystem[actualSummarize]?.role !== "user") {
+    actualSummarize--;
+  }
+  if (actualSummarize <= 0) return ctx;
+
+  const toSummarize = nonSystem.slice(0, actualSummarize);
+  const toKeep = nonSystem.slice(actualSummarize);
 
   const summary = summarizeBlock(toSummarize);
   const result: Message[] = [...systemMessages, summary, ...toKeep];
 
-  // If still over target, aggressively increase the summarised window
+  // If still over target AND there are enough messages to spare, do one more
+  // round — but never compress below 6 verbatim messages, and always align
+  // the second split to a user/assistant boundary.
   const testCtx = { ...ctx, messages: result };
-  if (estimateTokens(testCtx) > targetTokens && toKeep.length > 2) {
-    const extra = summarizeBlock(toKeep.slice(0, Math.floor(toKeep.length / 2)));
-    return {
-      ...ctx,
-      messages: [...systemMessages, extra, ...toKeep.slice(Math.floor(toKeep.length / 2))],
-    };
+  if (estimateTokens(testCtx) > targetTokens && toKeep.length > 6) {
+    let secondSplit = Math.floor(toKeep.length / 3);
+    // Align to nearest user message boundary (same reason as above)
+    while (secondSplit > 0 && toKeep[secondSplit]?.role !== "user") {
+      secondSplit--;
+    }
+    if (secondSplit > 0) {
+      const extra = summarizeBlock(toKeep.slice(0, secondSplit));
+      return {
+        ...ctx,
+        messages: [...systemMessages, extra, ...toKeep.slice(secondSplit)],
+      };
+    }
   }
 
   return { ...ctx, messages: result };

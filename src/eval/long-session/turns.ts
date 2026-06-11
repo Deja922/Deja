@@ -288,9 +288,22 @@ export const SESSION_TURNS: LongSessionTurn[] = [
   },
 ];
 
-export function getTurns(limit?: number, workflow: "coding" | "planning" | "agent" = "coding"): LongSessionTurn[] {
+export function getTurns(limit?: number, workflow: "coding" | "planning" | "agent" = "coding", dataset: "loop" | "realistic" = "loop"): LongSessionTurn[] {
   const source = workflow === "planning" ? PLANNING_TURNS : workflow === "agent" ? AGENT_TURNS : SESSION_TURNS;
-  return limit ? source.slice(0, limit) : source;
+
+  // realistic dataset is non-looping: only use authored turns in order.
+  if (dataset === "realistic") {
+    const max = limit ? Math.min(limit, source.length) : source.length;
+    return source.slice(0, max).map((turn, index) => ({ ...turn, id: index + 1 }) as LongSessionTurn);
+  }
+
+  if (!limit) return source;
+  const result: LongSessionTurn[] = [];
+  for (let i = 0; i < limit; i++) {
+    const base = source[i % source.length];
+    result.push({ ...base, id: i + 1 } as LongSessionTurn);
+  }
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

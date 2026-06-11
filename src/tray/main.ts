@@ -6,16 +6,20 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-type DejaState = "running" | "bypass" | "error" | "stopped";
+type DejaState = "running" | "bypass" | "auto-bypass" | "limit" | "error" | "stopped";
 
 interface HealthData {
   status: string;
   bypass: boolean;
+  bypassReason: string | null;
   upstreamOk: boolean | null;
   requests: number;
   tokensSaved: number;
   compressionPct: number;
   uptime: number;
+  licenseMonthlyUsage: number;
+  licenseMonthlyLimit: number | null;
+  licenseLimitReached: boolean;
 }
 
 let win: BrowserWindow | null = null;
@@ -29,7 +33,9 @@ function pollHealth(): void {
     res.on("end", () => {
       try {
         lastHealth = JSON.parse(body) as HealthData;
-        if (lastHealth.bypass) currentState = "bypass";
+        if (lastHealth.bypass && lastHealth.bypassReason === "auto-high-compression") currentState = "auto-bypass";
+        else if (lastHealth.bypass) currentState = "bypass";
+        else if (lastHealth.licenseLimitReached) currentState = "limit";
         else if (lastHealth.status === "degraded" || lastHealth.upstreamOk === false) currentState = "error";
         else currentState = "running";
       } catch {
@@ -128,17 +134,25 @@ document.getElementById('close').onclick=()=>ipcRenderer.send('win-hide');
 btnPause.onclick=()=>ipcRenderer.send('proxy-cmd',btnPause.dataset.cmd);
 btnDash.onclick=()=>shell.openExternal('http://localhost:9090/__deja__');
 ipcRenderer.on('health',(_,{state,health})=>{
-  const C={running:'#48bb78',bypass:'#ecc94b',error:'#fc8181',stopped:'#4a5568'};
-  const L={running:'运行中',bypass:'暂停中 (bypass)',error:'连接异常',stopped:'服务未运行'};
+  const C={running:'#48bb78',bypass:'#ecc94b','auto-bypass':'#ed8936',limit:'#fc8181',error:'#fc8181',stopped:'#4a5568'};
+  const L={running:'运行中',bypass:'已暂停 (手动)','auto-bypass':'⚡ 安全模式（上下文过长）',limit:'🔒 免费版已达月限',error:'连接异常',stopped:'服务未运行'};
   dot.style.background=C[state];
   stateEl.textContent=L[state];
-  const active=state==='running'||state==='bypass';
-  btnPause.disabled=!active;
-  btnDash.disabled=!active;
-  btnPause.dataset.cmd=state==='bypass'?'/deja/resume':'/deja/bypass';
-  btnPause.textContent=state==='bypass'?'▶ 恢复压缩':'⏸ 暂停压缩';
-  if(health&&active){
-    stats.innerHTML='节省 <b style="color:#90cdf4">'+(health.tokensSaved||0).toLocaleString()+'</b> tokens ('+(health.compressionPct||0)+'%)<br>请求 '+(health.requests||0)+' 次 &nbsp;|&nbsp; 运行 '+fmt(health.uptime||0);
+  const active=state==='running'||state==='bypass'||state==='auto-bypass';
+  const isLimit=state==='limit';
+  btnPause.disabled=!active&&!isLimit;
+  btnDash.disabled=!(active||isLimit);
+  if(isLimit){
+    btnPause.dataset.cmd='';
+    btnPause.textContent='⚡ 激活 Pro';
+    btnPause.onclick=()=>shell.openExternal('http://localhost:9090/__deja__');
+  }else{
+    btnPause.dataset.cmd=(state==='bypass'||state==='auto-bypass')?'/deja/resume':'/deja/bypass';
+    btnPause.textContent=(state==='bypass'||state==='auto-bypass')?'▶ 恢复压缩':'⏸ 暂停压缩';
+    btnPause.onclick=()=>ipcRenderer.send('proxy-cmd',btnPause.dataset.cmd);
+  }
+  if(health&&(active||isLimit)){
+    const usageInfo=isLimit?'本月已压缩 <b style="color:#fc8181">'+(health.licenseMonthlyUsage||0)+'/'+(health.licenseMonthlyLimit||100)+'</b> 次<br>':'';    stats.innerHTML=usageInfo+'节省 <b style="color:#90cdf4">'+(health.tokensSaved||0).toLocaleString()+'</b> tokens ('+(health.compressionPct||0)+'%)<br>请求 '+(health.requests||0)+' 次 &nbsp;|&nbsp; 运行 '+fmt(health.uptime||0);
   }else{
     stats.textContent=state==='stopped'?'代理服务未运行':'—';
   }

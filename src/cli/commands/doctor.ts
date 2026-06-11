@@ -2,10 +2,19 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import http from "http";
+import type { RuntimeConfig } from "../../proxy/config-types.js";
+import {
+  getCliReadCandidates,
+  getUserConfigPath,
+  getWindowsProgramDataConfigPath,
+  getWindowsSystemProfileConfigPath,
+  readFirstAvailableRuntimeConfig,
+  readRuntimeConfig,
+} from "@/config/deja-config-store.js";
 import { isManagedSettingsActive, MANAGED_SETTINGS_PATH } from "../managed-settings.js";
 
 function stripBOM(s: string): string {
-  return s.codePointAt(0) === 0xFEFF ? s.slice(1) : s;
+  return s.codePointAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
 function readCurrentUrl(settings: Record<string, unknown>): string | undefined {
@@ -43,11 +52,16 @@ function httpGet(url: string): Promise<{ ok: boolean; status?: number; body?: st
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: 5000 }, (res) => {
       let body = "";
-      res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      res.on("data", (chunk: Buffer) => {
+        body += chunk.toString();
+      });
       res.on("end", () => resolve({ ok: true, status: res.statusCode ?? 200, body }));
     });
     req.on("error", () => resolve({ ok: false }));
-    req.on("timeout", () => { req.destroy(); resolve({ ok: false }); });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ ok: false });
+    });
   });
 }
 
@@ -73,19 +87,61 @@ function findSettingsPaths(): string[] {
   return paths;
 }
 
-function readApiKeyFromConfig(): string | undefined {
-  try {
-    const configPath = join(homedir(), ".deja", "config.json");
-    if (!existsSync(configPath)) return undefined;
-    const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    const providers = raw["providers"] as Record<string, { apiKey?: string }> | undefined;
-    if (!providers) return undefined;
-    const defaultProvider = raw["defaultProvider"] as string | undefined;
-    const provider = defaultProvider ? providers[defaultProvider] : Object.values(providers)[0];
-    return provider?.apiKey;
-  } catch {
-    return undefined;
+function maskKey(key: string): string {
+  if (key.length <= 8) return "***";
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+function configSignature(config: RuntimeConfig): string {
+  const provider = config.providers[config.defaultProvider];
+  return JSON.stringify({
+    port: config.port,
+    defaultProvider: config.defaultProvider,
+    baseUrl: provider?.baseUrl ?? "",
+    apiKey: provider?.apiKey ?? "",
+    compatMode: provider?.compatMode ?? "",
+  });
+}
+
+interface ConfigSnapshot {
+  path: string;
+  exists: boolean;
+  config: RuntimeConfig | null;
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
   }
+  return out;
+}
+
+function getMirrorPaths(): string[] {
+  const base = process.platform === "win32"
+    ? [getUserConfigPath(), getWindowsProgramDataConfigPath(), getWindowsSystemProfileConfigPath()]
+    : [getUserConfigPath()];
+  const envPath = process.env["DEJA_CONFIG_PATH"];
+  const cliCandidates = getCliReadCandidates();
+  return uniquePaths([
+    ...(envPath ? [envPath] : []),
+    ...base,
+    ...cliCandidates,
+  ]);
+}
+
+function readSnapshots(paths: string[]): ConfigSnapshot[] {
+  return paths.map((path) => {
+    const exists = existsSync(path);
+    return {
+      path,
+      exists,
+      config: exists ? readRuntimeConfig(path) : null,
+    };
+  });
 }
 
 export async function doctor(opts: DoctorOptions): Promise<void> {
@@ -94,11 +150,10 @@ export async function doctor(opts: DoctorOptions): Promise<void> {
 
   console.log("");
   console.log("  Deja Doctor");
-  console.log("  ───────────");
+  console.log("  -----------");
   console.log(`  OS: ${process.platform} | Node: ${process.version}`);
   console.log("");
 
-  // 1. Proxy check
   console.log("  [Proxy]");
   const proxyResult = await httpGet(`${proxyUrl}/health`);
   if (proxyResult.ok) {
@@ -110,35 +165,31 @@ export async function doctor(opts: DoctorOptions): Promise<void> {
         console.log(`         requests: ${String(stats["requests"] ?? "?")}`);
         console.log(`         tokens saved: ${String(stats["tokensSaved"] ?? "?")}`);
         if (stats["upstreamOk"] === false) {
-          console.log(`         upstream: DEGRADED — ${String(stats["upstreamLastError"] ?? "unknown")}`);
+          console.log(`         upstream: DEGRADED -> ${String(stats["upstreamLastError"] ?? "unknown")}`);
         }
-      } catch { /* ignore */ }
+      } catch {
+        // ignore
+      }
     }
   } else {
-    check("Proxy is running", false, `Cannot reach ${proxyUrl} — is the proxy started? Run: deja start`);
+    check("Proxy is running", false, `Cannot reach ${proxyUrl}. Run: deja start`);
   }
   console.log("");
 
-  // 2. Routing config — managed-settings.json (highest priority override)
   console.log("  [Routing Config]");
   if (isManagedSettingsActive()) {
-    check("managed-settings.json", true, `${MANAGED_SETTINGS_PATH} → localhost:${port}`);
-    console.log(`         Claude Code routes through Deja (this file is removed when Deja stops).`);
+    check("managed-settings.json", true, `${MANAGED_SETTINGS_PATH} -> localhost:${port}`);
     if (!proxyResult.ok) {
-      console.log(`         WARN: Deja is not running but managed-settings.json is present.`);
-      console.log(`         Run "deja start" to start Deja, or "deja stop" to restore direct access.`);
+      console.log("         WARN: managed-settings is active but Deja is not running.");
+      console.log('         Run "deja start" or "deja stop" to restore direct routing.');
     }
+  } else if (existsSync(MANAGED_SETTINGS_PATH)) {
+    info("managed-settings.json", `${MANAGED_SETTINGS_PATH} exists but does not point to Deja`);
   } else {
-    const msExists = existsSync(MANAGED_SETTINGS_PATH);
-    if (msExists) {
-      info("managed-settings.json", `${MANAGED_SETTINGS_PATH} exists but does not point to Deja`);
-    } else {
-      info("managed-settings.json", `Not present — run "deja start" to create it (requires admin on Windows)`);
-    }
+    info("managed-settings.json", 'Not present. Run "deja start" to create it.');
   }
   console.log("");
 
-  // 3. Upstream check
   console.log("  [Upstream]");
   if (proxyResult.ok && proxyResult.body) {
     try {
@@ -149,66 +200,118 @@ export async function doctor(opts: DoctorOptions): Promise<void> {
       } else if (upstreamOk === false) {
         check("Upstream reachable", false, String(stats["upstream"] ?? "unknown"));
       } else {
-        info("Upstream reachable", "not yet verified (no requests processed)");
+        info("Upstream reachable", "Not yet verified (no forwarded requests yet).");
       }
     } catch {
-      info("Upstream reachable", "unknown (proxy responded but no stats)");
+      info("Upstream reachable", "Unknown (invalid health payload).");
     }
   } else {
-    info("Upstream reachable", "unknown (proxy not running)");
+    info("Upstream reachable", "Unknown (proxy not running).");
   }
   console.log("");
 
-  // 4. Claude Code settings.json fallback check
-  console.log("  [Claude Code settings.json]");
-  console.log("  (Fallback when managed-settings.json is not present)");
+  console.log("  [Runtime Config Mirrors]");
+  const snapshots = readSnapshots(getMirrorPaths());
+  const readable = snapshots.filter((s) => s.config);
+  for (const snap of snapshots) {
+    if (!snap.exists) {
+      info(snap.path, "missing");
+      continue;
+    }
+    if (!snap.config) {
+      check(snap.path, false, "exists but cannot be parsed");
+      continue;
+    }
+    const provider = snap.config.providers[snap.config.defaultProvider];
+    const maskedKey = provider?.apiKey ? maskKey(provider.apiKey) : "(none)";
+    info(
+      snap.path,
+      `provider=${snap.config.defaultProvider}, baseUrl=${provider?.baseUrl ?? "(none)"}, key=${maskedKey}`,
+    );
+  }
+
+  if (readable.length <= 1) {
+    info("Mirror drift", "not enough readable mirrors to compare");
+  } else {
+    const baseline = configSignature(readable[0]!.config!);
+    const drifted = readable.filter((s) => configSignature(s.config!) !== baseline);
+    if (drifted.length === 0) {
+      check("Mirror drift", true, "all readable runtime config mirrors are in sync");
+    } else {
+      check("Mirror drift", false, `detected differences in ${drifted.length} mirror file(s)`);
+      for (const d of drifted) {
+        console.log(`         drift: ${d.path}`);
+      }
+      console.log("         fix: deja key:update --key YOUR_NEW_KEY");
+      if (process.platform === "win32") {
+        console.log("         note: run Administrator PowerShell so ProgramData can be updated.");
+      }
+    }
+  }
+  if (process.platform === "win32") {
+    const { isWindowsServiceInstalled } = await import("../../service/windows-service.js");
+    if (isWindowsServiceInstalled()) {
+      const programDataPath = getWindowsProgramDataConfigPath();
+      const programDataSnapshot = snapshots.find((s) => s.path === programDataPath);
+      if (!programDataSnapshot?.config) {
+        check(
+          "Windows service config",
+          false,
+          `${programDataPath} is missing/unreadable while service is installed`,
+        );
+        console.log("         fix: run Administrator PowerShell, then `deja key:update --key YOUR_NEW_KEY`");
+      } else {
+        check("Windows service config", true, `${programDataPath} is present and readable`);
+      }
+    }
+  }
+  console.log("");
+
+  console.log("  [Claude/Cursor settings.json fallback]");
+  console.log("  (Used when managed-settings.json is not active)");
   const configPaths = findSettingsPaths();
   let foundConfig = false;
 
   for (const configPath of configPaths) {
     if (!existsSync(configPath)) continue;
     foundConfig = true;
-
     try {
       const raw = stripBOM(readFileSync(configPath, "utf-8"));
       const settings = JSON.parse(raw) as Record<string, unknown>;
       const baseUrl = readCurrentUrl(settings);
 
       if (baseUrl === proxyUrl) {
-        info(`${configPath}`, `ANTHROPIC_BASE_URL → ${proxyUrl} (points to Deja)`);
+        info(configPath, `ANTHROPIC_BASE_URL -> ${proxyUrl} (points to Deja)`);
       } else if (baseUrl) {
-        info(`${configPath}`, `ANTHROPIC_BASE_URL = ${String(baseUrl)}`);
+        info(configPath, `ANTHROPIC_BASE_URL = ${String(baseUrl)}`);
       } else {
-        info(`${configPath}`, "ANTHROPIC_BASE_URL not set (uses default or env var)");
+        info(configPath, "ANTHROPIC_BASE_URL not set");
       }
     } catch {
-      info(`${configPath}`, "Cannot parse JSON");
+      info(configPath, "Cannot parse JSON");
     }
   }
-
   if (!foundConfig) {
-    info("Config found", "No Claude Code settings.json found");
+    info("Fallback config", "No Claude/Cursor settings.json found");
   }
   console.log("");
 
-  // 5. API key check
   console.log("  [API Key]");
   const envKey = process.env["ANTHROPIC_API_KEY"] ?? process.env["OPENAI_API_KEY"];
-  const configKey = readApiKeyFromConfig();
+  const loaded = readFirstAvailableRuntimeConfig(getCliReadCandidates());
+  const configProvider = loaded?.config.providers[loaded.config.defaultProvider];
+  const configKey = configProvider?.apiKey;
   const effectiveKey = envKey ?? configKey;
 
   if (effectiveKey) {
-    const masked = effectiveKey.length > 8
-      ? effectiveKey.slice(0, 4) + "..." + effectiveKey.slice(-4)
-      : "***";
-    const source = envKey ? "environment variable" : "~/.deja/config.json";
-    check("API key found", true, `${masked} (from ${source})`);
+    const source = envKey ? "environment variable" : loaded?.path ?? "runtime config";
+    check("API key found", true, `${maskKey(effectiveKey)} (from ${source})`);
   } else {
-    check("API key found", false, "No API key — run: deja setup");
+    check("API key found", false, 'No key detected. Run "deja setup" or "deja key:update --key ...".');
   }
   console.log("");
 
-  console.log("  ───────────");
+  console.log("  -----------");
   console.log("  Doctor complete.");
   console.log("");
 }

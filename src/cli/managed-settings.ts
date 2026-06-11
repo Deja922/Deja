@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { homedir } from "os";
 
 // Managed-settings.json is the enterprise policy layer for Claude Code.
 // Priority: managed-settings.json > env vars > settings.json (CC Switch never writes here).
@@ -11,9 +12,21 @@ function getManagedSettingsPath(): string {
     const programData = process.env["ProgramData"] ?? "C:\\ProgramData";
     return join(programData, "ClaudeCode", "managed-settings.json");
   } else if (process.platform === "darwin") {
-    return "/Library/Application Support/ClaudeCode/managed-settings.json";
+    // Prefer user-level path — works without root and is compatible with
+    // the LaunchAgent (which also runs as the logged-in user, not root).
+    // Fall back to system-level only when running as root (uid 0).
+    const uid = (process as { getuid?: () => number }).getuid?.() ?? 1;
+    if (uid === 0) {
+      return "/Library/Application Support/ClaudeCode/managed-settings.json";
+    }
+    return join(homedir(), "Library", "Application Support", "ClaudeCode", "managed-settings.json");
   } else {
-    return "/etc/claude-code/managed-settings.json";
+    // Linux
+    const uid = (process as { getuid?: () => number }).getuid?.() ?? 1;
+    if (uid === 0) {
+      return "/etc/claude-code/managed-settings.json";
+    }
+    return join(homedir(), ".config", "claude-code", "managed-settings.json");
   }
 }
 

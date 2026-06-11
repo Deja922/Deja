@@ -1,39 +1,48 @@
-// node-windows Windows Service 注册/卸载封装。
-// node-windows 是 CommonJS 包，通过 createRequire 引入（项目是 ESM）。
-
 import { createRequire } from "module";
-import { join } from "path";
-import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
+import { join, dirname } from "path";
+import { existsSync, copyFileSync, mkdirSync } from "fs";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
+import {
+  getUserConfigPath,
+  getWindowsProgramDataConfigPath,
+  getWindowsSystemProfileConfigPath,
+} from "@/config/deja-config-store.js";
 
 const require = createRequire(import.meta.url);
 
 const SERVICE_NAME = "Deja Context Engine";
-const SERVICE_DESC = "Deja — Claude Code 智能上下文压缩代理，开机自启，后台静默运行";
+const SERVICE_DESC = "Deja context proxy service";
+const SERVICE_NAME_CANDIDATES = ["dejacontextengine", "dejacontextengine.exe", SERVICE_NAME] as const;
 
-// 编译产物路径：dist/service/service-entry.js
-// import.meta.url 在 Windows 上形如 file:///C:/path/... 需要 fileURLToPath 处理
 const __filename = fileURLToPath(import.meta.url);
 const SERVICE_SCRIPT = join(__filename, "..", "service-entry.js");
 
 function buildEnv(): Array<{ name: string; value: string }> {
-  const env: Array<{ name: string; value: string }> = [];
+  return [{ name: "DEJA_CONFIG_PATH", value: getWindowsProgramDataConfigPath() }];
+}
+
+function ensureWindowsServiceConfigSeed(): void {
+  const targetPath = getWindowsProgramDataConfigPath();
+  const userPath = getUserConfigPath();
+  const legacySystemProfilePath = getWindowsSystemProfileConfigPath();
+
   try {
-    const configPath = join(homedir(), ".deja", "config.json");
-    if (!existsSync(configPath)) return env;
-    const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    const providers = raw["providers"] as Record<string, { apiKey?: string }> | undefined;
-    if (!providers) return env;
-    const defaultProvider = raw["defaultProvider"] as string | undefined;
-    const provider = defaultProvider ? providers[defaultProvider] : Object.values(providers)[0];
-    if (provider?.apiKey) {
-      env.push({ name: "ANTHROPIC_API_KEY", value: provider.apiKey });
+    if (existsSync(userPath)) {
+      mkdirSync(dirname(targetPath), { recursive: true });
+      copyFileSync(userPath, targetPath);
+      return;
+    }
+
+    if (existsSync(targetPath)) return;
+
+    if (existsSync(legacySystemProfilePath)) {
+      mkdirSync(dirname(targetPath), { recursive: true });
+      copyFileSync(legacySystemProfilePath, targetPath);
     }
   } catch {
-    // ignore — 服务进程会自己读 config.json
+    // Ignore seed errors; service-entry still has fallback config candidates.
   }
-  return env;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,17 +54,53 @@ function createService(): any {
     description: SERVICE_DESC,
     script: SERVICE_SCRIPT,
     nodeOptions: [],
-    execPath: process.execPath,   // 使用当前 Node 路径（防 LocalSystem 找不到 nvm 的 Node）
+    execPath: process.execPath,
     env: buildEnv(),
-    wait: 2,           // 崩溃后等 2 秒重启
-    grow: 0.25,        // 每次崩溃延迟 +25%（指数退避）
-    maxRestarts: 10,   // 最多 10 次，之后服务进入 paused 状态等待管理员
+    wait: 2,
+    grow: 0.25,
+    maxRestarts: 10,
     abortOnError: false,
   });
 }
 
+function getInstalledServiceName(): string | null {
+  for (const candidate of SERVICE_NAME_CANDIDATES) {
+    try {
+      execSync(`sc.exe query "${candidate}"`, { stdio: "pipe", windowsHide: true });
+      return candidate;
+    } catch {
+      // Try next.
+    }
+  }
+  return null;
+}
+
+export function isWindowsServiceInstalled(): boolean {
+  return getInstalledServiceName() !== null;
+}
+
+export function restartWindowsServiceIfInstalled(): { restarted: boolean; serviceName?: string; error?: string } {
+  const serviceName = getInstalledServiceName();
+  if (!serviceName) return { restarted: false };
+
+  try {
+    execSync(`powershell -NoProfile -Command "Restart-Service -Name '${serviceName}' -Force -ErrorAction Stop"`, {
+      stdio: "pipe",
+      windowsHide: true,
+    });
+    return { restarted: true, serviceName };
+  } catch (err) {
+    return {
+      restarted: false,
+      serviceName,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function registerService(): Promise<void> {
   return new Promise((resolve, reject) => {
+    ensureWindowsServiceConfigSeed();
     const svc = createService() as {
       on(e: string, cb: () => void): void;
       install(): void;
@@ -71,7 +116,7 @@ export function registerService(): Promise<void> {
       resolve();
     });
     svc.on("start", () => {
-      console.log(`[deja-service] Service started.`);
+      console.log("[deja-service] Service started.");
     });
     svc.on("error", () => reject(new Error("node-windows service install failed")));
     svc.install();
@@ -93,14 +138,18 @@ export function unregisterService(): Promise<void> {
   });
 }
 
-// CLI 支持：node dist/service/windows-service.js register|uninstall
-// 供 install.ps1 和内部脚本调用
 if (process.argv[2] === "register") {
   registerService()
     .then(() => process.exit(0))
-    .catch((e: unknown) => { console.error(e); process.exit(1); });
-} else if (process.argv[2] === "uninstall") {
+    .catch((e: unknown) => {
+      console.error(e);
+      process.exit(1);
+    });
+} else if (process.argv[2] === "uninstall" || process.argv[2] === "remove") {
   unregisterService()
     .then(() => process.exit(0))
-    .catch((e: unknown) => { console.error(e); process.exit(1); });
+    .catch((e: unknown) => {
+      console.error(e);
+      process.exit(1);
+    });
 }
