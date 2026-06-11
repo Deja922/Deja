@@ -6,7 +6,7 @@ const program = new Command();
 program
   .name("deja")
   .description("Deja Context Engine - compress, deduplicate, and stabilize LLM context")
-  .version("0.1.3");
+  .version("0.1.4");
 
 program
   .command("setup")
