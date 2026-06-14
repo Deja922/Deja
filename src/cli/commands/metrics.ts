@@ -1,0 +1,64 @@
+import { readMetrics, aggregateMetrics } from "@/proxy/metrics-logger.js";
+
+// `deja metrics` — local, privacy-safe usage summary for beta data collection.
+// Reads ~/.deja/metrics.jsonl (numbers/enums only) and prints aggregates a
+// tester can read or paste into a feedback issue. Nothing is uploaded.
+
+export function metricsCmd(opts: { json?: boolean }): void {
+  const entries = readMetrics();
+
+  if (entries.length === 0) {
+    console.log("");
+    console.log("  No metrics recorded yet.");
+    console.log("  Use Deja with your AI tool for a while, then run `deja metrics` again.");
+    console.log("");
+    return;
+  }
+
+  const s = aggregateMetrics(entries);
+
+  if (opts.json) {
+    console.log(JSON.stringify(s, null, 2));
+    return;
+  }
+
+  const pct = (n: number, d: number): string =>
+    d > 0 ? `${Math.round((n / d) * 100)}%` : "0%";
+
+  console.log("");
+  console.log("  Deja Usage Metrics (local only — nothing is uploaded)");
+  console.log("  ─────────────────────────────────────────────────────");
+  console.log("");
+  console.log(`  Window:        ${fmt(s.firstTs)} → ${fmt(s.lastTs)}`);
+  console.log(`  Requests:      ${s.totalRequests}`);
+  console.log("");
+  console.log("  ── Outcomes ──");
+  console.log(`  Compressed:    ${s.compressed} (${pct(s.compressed, s.totalRequests)})`);
+  console.log(`  Skipped:       ${s.skipped} (${pct(s.skipped, s.totalRequests)})  below threshold`);
+  console.log(`  Passthrough:   ${s.passthrough} (${pct(s.passthrough, s.totalRequests)})`);
+  console.log(`  Auto-bypass:   ${s.bypass} (${s.autoBypassRate}%)  safe-mode passthrough`);
+  console.log(`  Errors:        ${s.error}`);
+  console.log("");
+  console.log("  ── Token Savings (compressed requests) ──");
+  console.log(`  Average:       ${s.avgSavedPct}%`);
+  console.log(`  Median:        ${s.medianSavedPct}%`);
+  console.log("  Distribution:");
+  for (const [bucket, count] of Object.entries(s.savingsBuckets)) {
+    console.log(`    ${bucket.padEnd(8)} ${bar(count, s.compressed)} ${count}`);
+  }
+  console.log("");
+  console.log("  Share feedback (optional): run `deja metrics --json` and paste");
+  console.log("  the output into https://github.com/Deja922/Deja/issues/1");
+  console.log("");
+}
+
+function fmt(ts: string | null): string {
+  if (!ts) return "n/a";
+  return ts.replace("T", " ").slice(0, 16);
+}
+
+function bar(count: number, total: number): string {
+  if (total <= 0) return "";
+  const width = Math.round((count / total) * 20);
+  return "█".repeat(width).padEnd(20);
+}

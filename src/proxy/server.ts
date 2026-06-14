@@ -11,6 +11,7 @@ import { resolveEnv, DEFAULT_CONFIG, COMPRESSION_MODES } from "./config-types.js
 import { UpstreamResolver } from "./upstream-resolver.js";
 import { renderDashboard } from "./dashboard.js";
 import { writeProxyLog } from "./proxy-logger.js";
+import { appendMetric } from "./metrics-logger.js";
 import { removeManagedSettings } from "../cli/managed-settings.js";
 import { incrementUsage, getUsageStatus } from "../cli/usage.js";
 import { getLicenseStatus } from "../cli/license.js";
@@ -365,6 +366,17 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           if (verbose) {
             process.stderr.write(`[deja] ⚡ auto-bypass passthrough: context=${rawTokens}tok msgs=${msgCount} still large\n`);
           }
+          appendMetric({
+            ts: new Date().toISOString(),
+            outcome: "bypass",
+            msgs: msgCount,
+            inTokens: effectiveTokens,
+            outTokens: 0,
+            savedPct: 0,
+            dropped: 0,
+            bypass: true,
+            reason: "auto-high-compression",
+          });
           passthrough(req, rawBody, res, provider, "auto-bypass", verbose);
           return;
         }
@@ -397,6 +409,17 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
             `[deja] compression skipped (context below threshold: ${effectiveTokens}tok < ${threshold}tok)\n`
           );
         }
+        appendMetric({
+          ts: new Date().toISOString(),
+          outcome: "skipped",
+          msgs: (body["messages"] as unknown[] | undefined)?.length ?? 0,
+          inTokens: effectiveTokens,
+          outTokens: 0,
+          savedPct: 0,
+          dropped: 0,
+          bypass: session.bypass,
+          reason: "below-threshold",
+        });
         passthrough(req, rawBody, res, provider, `${effectiveTokens}tok<threshold`, verbose);
         return;
       }
@@ -514,6 +537,18 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       session.lastRequestTokens = rawTokens;
       session.lastRequestCompressed = true;
       incrementUsage();
+
+      appendMetric({
+        ts: new Date().toISOString(),
+        outcome: "compressed",
+        msgs: rawCtx.messages.length,
+        inTokens: fullBodyTokens,
+        outTokens: outputBodyTokens,
+        savedPct: pct,
+        dropped: stats.messagesDropped,
+        bypass: session.bypass,
+        reason: session.bypassReason,
+      });
 
       // 智能自动 bypass：仅当 pipeline 真正大量丢弃消息（messagesDropped > 3）
       // 且字节压缩率 ≥95% 时才进入安全模式。

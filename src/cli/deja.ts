@@ -105,6 +105,15 @@ program
   });
 
 program
+  .command("metrics")
+  .description("Show local usage metrics (savings, bypass rate) — nothing is uploaded")
+  .option("--json", "Output raw JSON summary", false)
+  .action(async (opts: { json?: boolean }) => {
+    const { metricsCmd } = await import("./commands/metrics.js");
+    metricsCmd({ json: opts.json ?? false });
+  });
+
+program
   .command("bypass <state>")
   .description("Pause/resume compression without stopping the proxy (on | off)")
   .option("--port <number>", "Proxy port", "9090")
