@@ -344,21 +344,26 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       const effectiveTokens = Math.max(rawTokens, fullBodyTokens);
 
       // 智能自动 bypass（auto-high-compression）：已经进入安全模式，检查是否可以自动恢复
-      // 恢复条件：上下文已缩小到压缩阈值以下（通常意味着新对话开始）
+      // 恢复条件：消息数 ≤ 2（新对话开始）或上下文缩小到阈值以下
+      // 注意：不能只用 effectiveTokens < threshold，因为 Claude Code 每次请求都携带
+      // 完整 system prompt（~5000-8000 tok），effectiveTokens 永远不会低于 200。
       if (session.bypass && session.bypassReason === "auto-high-compression") {
+        const msgCount = (body["messages"] as unknown[] | undefined)?.length ?? 0;
+        const isNewConversation = msgCount <= 2;
         const threshold = config.pipeline.compressThreshold;
-        if (effectiveTokens < threshold) {
+        if (isNewConversation || effectiveTokens < threshold) {
           session.bypass = false;
           session.bypassReason = null;
           if (verbose) {
-            process.stderr.write(`[deja] ⚡ auto-resume: context shrunk to ${rawTokens}tok (below threshold ${threshold}tok)\n`);
+            const reason = isNewConversation ? `new conversation (msgs=${msgCount})` : `context shrunk to ${rawTokens}tok`;
+            process.stderr.write(`[deja] ⚡ auto-resume: ${reason}\n`);
           }
-          writeProxyLog({ ts: new Date().toISOString(), type: "startup", msg: "auto-resume: context shrunk below threshold", data: { rawTokens, threshold } });
+          writeProxyLog({ ts: new Date().toISOString(), type: "startup", msg: "auto-resume", data: { msgCount, rawTokens, threshold } });
           // Fall through to normal compression
         } else {
           session.passthrough++;
           if (verbose) {
-            process.stderr.write(`[deja] ⚡ auto-bypass passthrough: context=${rawTokens}tok still large\n`);
+            process.stderr.write(`[deja] ⚡ auto-bypass passthrough: context=${rawTokens}tok msgs=${msgCount} still large\n`);
           }
           passthrough(req, rawBody, res, provider, "auto-bypass", verbose);
           return;
@@ -489,34 +494,45 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         return;
       }
 
+      // Serialize compressed body now so we can use the actual byte size for
+      // stats — body-level sizes correctly account for tool blocks that
+      // text-only token estimates would miss entirely.
+      const newBodyBuf = Buffer.from(JSON.stringify(newBody));
+
       // Record stats only after confirming the compressed request is valid.
-      const saved = stats.originalTokens - stats.outputTokens;
+      // Use actual body sizes (not text-only estimates) so tool-heavy Claude Code
+      // sessions show real savings — text-only counts miss the tool blocks entirely.
+      const outputBodyTokens = Math.ceil(newBodyBuf.length / 4);
+      const saved = fullBodyTokens - outputBodyTokens;
       const pct = Math.round(
-        (1 - stats.outputTokens / Math.max(stats.originalTokens, 1)) * 100,
+        (1 - outputBodyTokens / Math.max(fullBodyTokens, 1)) * 100,
       );
 
       session.compressed++;
-      session.totalOriginalTokens += stats.originalTokens;
-      session.totalOutputTokens += stats.outputTokens;
+      session.totalOriginalTokens += fullBodyTokens;
+      session.totalOutputTokens += outputBodyTokens;
       session.lastRequestTokens = rawTokens;
       session.lastRequestCompressed = true;
       incrementUsage();
 
-      // 智能自动 bypass：压缩比 ≥85% 说明上下文太长，压缩可能造成答非所问
-      // 进入安全模式，后续请求透传，直到上下文缩小后自动恢复
-      const AUTO_BYPASS_THRESHOLD = 85;
-      if (!session.bypass && pct >= AUTO_BYPASS_THRESHOLD) {
+      // 智能自动 bypass：仅当 pipeline 真正大量丢弃消息（messagesDropped > 3）
+      // 且字节压缩率 ≥95% 时才进入安全模式。
+      // 普通的 tool_result 内容替换（compressOldToolContent）会产生高字节压缩率
+      // 但不丢弃消息，这种情况是正常且安全的，不应触发 bypass。
+      const AUTO_BYPASS_THRESHOLD = 95;
+      const AUTO_BYPASS_MIN_DROPS = 3;
+      if (!session.bypass && pct >= AUTO_BYPASS_THRESHOLD && stats.messagesDropped > AUTO_BYPASS_MIN_DROPS) {
         session.bypass = true;
         session.bypassReason = "auto-high-compression";
         if (verbose) {
           process.stderr.write(
-            `[deja] ⚡ auto-bypass triggered: compression=${pct}% >= ${AUTO_BYPASS_THRESHOLD}% — entering safe mode\n`
+            `[deja] ⚡ auto-bypass triggered: compression=${pct}% dropped=${stats.messagesDropped} — entering safe mode\n`
           );
         }
         writeProxyLog({
           ts: new Date().toISOString(), type: "compression",
-          msg: `auto-bypass triggered: ${pct}% compression ratio too high`,
-          data: { pct, originalTokens: stats.originalTokens, outputTokens: stats.outputTokens },
+          msg: `auto-bypass triggered: ${pct}% compression, ${stats.messagesDropped} messages dropped`,
+          data: { pct, messagesDropped: stats.messagesDropped, originalTokens: stats.originalTokens, outputTokens: stats.outputTokens },
         });
       }
 
@@ -539,8 +555,6 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           durationMs: stats.durationMs,
         },
       });
-
-      const newBodyBuf = Buffer.from(JSON.stringify(newBody));
 
       // Forward to upstream
       forwardUpstream(req, newBodyBuf, res, provider, verbose);

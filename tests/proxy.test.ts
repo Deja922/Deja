@@ -327,6 +327,7 @@ describe("AnthropicAdapter — thinking mode protocol blocks", () => {
             { type: "text", text: "Answer." },
           ],
         },
+        { role: "user", content: "Follow up." },
       ],
     });
 

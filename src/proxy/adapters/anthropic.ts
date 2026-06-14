@@ -80,15 +80,27 @@ export class AnthropicAdapter implements IAdapter {
     const optimizedById = new Map(ctx.messages.map((m) => [m.id, m]));
     const messages: AnthropicMessage[] = [];
 
-    for (const record of typedRecords) {
+    // Build a set of "recent tool turn" indices: keep the last RECENT_TOOL_TURNS
+    // pairs (assistant tool_use + user tool_result) with full content.
+    // Older tool turns have their tool_result content compressed.
+    const structuredIndices = typedRecords
+      .map((r, i) => (r.hasStructuredBlocks ? i : -1))
+      .filter((i) => i !== -1);
+    const recentToolIdx = new Set(structuredIndices.slice(-RECENT_TOOL_TURNS * 2));
+
+    for (let ri = 0; ri < typedRecords.length; ri++) {
+      const record = typedRecords[ri]!;
       const optimized = optimizedById.get(record.id);
+      const isRecentTool = recentToolIdx.has(ri);
 
       if (!optimized) {
         // Dropped message — keep only if it has protocol or tool blocks
         if (record.hasStructuredBlocks || record.hasProtocolBlocks) {
           messages.push({
             role: record.original.role,
-            content: cleanContentForResend(record.original.content),
+            content: isRecentTool || record.hasProtocolBlocks
+              ? cleanContentForResend(record.original.content)
+              : compressOldToolContent(record.original.content),
           });
         }
         continue;
@@ -98,6 +110,7 @@ export class AnthropicAdapter implements IAdapter {
         record.original.content,
         record,
         optimized.summary ?? optimized.content,
+        isRecentTool,
       );
 
       messages.push({ role: record.original.role, content: newContent });
@@ -133,6 +146,15 @@ export class AnthropicAdapter implements IAdapter {
       messages.shift();
     }
 
+    // Safety net: messages must end with a user message (Anthropic API requirement).
+    // Compression may drop the final user turn (text-only, no structured blocks),
+    // leaving the array ending with an assistant message → 400 "does not support
+    // assistant message prefill". Pop trailing assistant messages until a user
+    // message is at the end.
+    while (messages.length > 1 && messages[messages.length - 1]!.role === "assistant") {
+      messages.pop();
+    }
+
     const result: AnthropicRequest = {
       ...(originalBody as AnthropicRequest),
       messages,
@@ -145,6 +167,11 @@ export class AnthropicAdapter implements IAdapter {
     return result;
   }
 }
+
+// How many recent tool-call rounds (assistant tool_use + user tool_result) to
+// keep uncompressed. Older rounds have their tool_result content replaced with
+// a short reference to reduce tokens for long Claude Code sessions.
+const RECENT_TOOL_TURNS = 3;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -221,6 +248,7 @@ function buildCompressedContent(
   original: AnthropicMessage["content"],
   record: MessageRecord,
   compressedText: string,
+  isRecentTool = true,
 ): AnthropicMessage["content"] {
   if (typeof original === "string") return compressedText;
 
@@ -236,6 +264,8 @@ function buildCompressedContent(
   }
 
   if (record.hasStructuredBlocks) {
+    // Old tool messages — compress tool_result content to save tokens
+    if (!isRecentTool) return compressOldToolContent(original);
     // Tool messages — keep original blocks intact
     return cleanContentForResend(original);
   }
@@ -319,6 +349,34 @@ function applyThinkingPolicy(
     if (i === lastAssistantIdx && contentHasToolUse(message.content)) continue;
     stripThinkingFromMessage(message);
   }
+}
+
+/**
+ * Replace large tool_result content with a short reference token.
+ * Called for tool messages that are outside the RECENT_TOOL_TURNS window.
+ * Keeps tool_use blocks intact (name + inputs needed for structural validity).
+ */
+function compressOldToolContent(
+  content: string | ContentBlock[],
+): string | ContentBlock[] {
+  if (typeof content === "string") return content;
+  return content.map((block): ContentBlock => {
+    if (block.type === "tool_result") {
+      const raw = block.content;
+      let len = 0;
+      if (typeof raw === "string") len = raw.length;
+      else if (Array.isArray(raw)) len = JSON.stringify(raw).length;
+      const approxTok = Math.ceil(len / 4);
+      if (approxTok > 50) {
+        return {
+          type: "tool_result",
+          tool_use_id: block.tool_use_id,
+          content: `[已压缩，原约${approxTok}tok]`,
+        } as ContentBlock;
+      }
+    }
+    return block;
+  });
 }
 
 /**
