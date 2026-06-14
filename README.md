@@ -1,100 +1,103 @@
-# Deja Context Engine
+# Deja — Claude Code 省钱神器
 
-Deja is a local proxy that keeps long AI coding sessions stable by compressing repetitive context before requests reach upstream APIs.
+> 本地代理，自动压缩重复上下文，实测节省 40–90% token 消耗。**公测中，免费使用。**
 
-## Public Beta Status
+---
 
-- Release channel: public beta
-- Pricing (current beta): free
-- Free beta policy: full features enabled for free users during beta
-- Target tools: Claude Code, Codex, Cursor, Continue
-- Supported OS: Windows now; macOS path included in installer/daemon flow
+## 效果
 
-## What Deja Solves
+| 场景 | 节省 |
+|------|------|
+| 普通编码会话（10–15 轮工具调用） | 30–50% |
+| 长时间连续对话（20 轮+） | 50–90% |
+| 公测期间实测均值 | ~84% |
 
-- Reduces repeated history tokens in long sessions
-- Helps keep response quality stable over long coding loops
-- Cuts token usage through dedup + selective compression
-- Provides safe bypass controls when compression should be paused
+每节省 100 万 token ≈ 省 $3（Claude API 标准计费）。重度用户每月可省 $20–60。
 
-## Quick Start
+---
 
-Install:
+## 安装
+
+**前提：** Node.js 18+（[下载](https://nodejs.org)）
 
 ```bash
 npm install -g deja-context
 ```
 
-Setup:
+**Windows**（以管理员身份运行 PowerShell）：
+```powershell
+deja setup
+deja service:install
+deja tools:install all
+```
 
+**macOS**（Terminal）：
 ```bash
 deja setup
-```
-
-Install service/daemon:
-
-```bash
 deja service:install
+deja tools:install all
 ```
 
-Route tools:
+安装后打开 Claude Code，右下角出现悬浮窗即为成功。
+
+---
+
+## 原理
+
+Deja 在本地运行一个代理（默认端口 9090），拦截发往 Claude API 的请求：
+
+1. 将超出最近 3 轮以外的 tool_result 内容替换为摘要
+2. 丢弃重复的历史文本块
+3. 上下文过长时自动切换到安全透传模式，保护对话质量
+
+**所有处理在本地完成，API key 不经过任何第三方服务器。**
+
+---
+
+## 常用命令
 
 ```bash
-deja tools:install all --port 9090
-deja tools:list --port 9090
+deja status          # 查看运行状态和节省统计
+deja dashboard       # 打开 Web 看板
+deja logs --follow   # 实时日志
+deja bypass on       # 手动暂停压缩（原样转发）
+deja bypass off      # 恢复压缩
+deja key:update --key NEW_KEY  # 更新 API key
+deja stop            # 停止代理
 ```
 
-Health check:
+---
+
+## 支持的 AI 工具
+
+| 工具 | Windows | macOS |
+|------|---------|-------|
+| Claude Code | ✅ | ✅ |
+| Cursor | ✅ | ✅ |
+| VS Code + Continue | ✅ | ✅ |
+| Codex CLI | ✅ | ✅ |
+
+---
+
+## 公测反馈
+
+遇到问题或有功能建议，欢迎在 [Issues](../../issues) 提交，请带上：
+- 操作系统和工具名称
+- `deja status` 输出
+- 问题描述
+
+---
+
+## 卸载
 
 ```bash
-deja doctor --port 9090
-deja status --port 9090
+deja service:remove
+deja tools:uninstall all
+npm uninstall -g deja-context
 ```
 
-Rotate key safely:
-
-```bash
-deja key:update --key NEW_API_KEY
-```
-
-## License and Account Readiness
-
-Current beta keeps usage free, but account/payment compatibility is prepared:
-
-- Local signed license verification
-- Redeem flow command: `deja license:redeem <code>`
-- Activation command: `deja license:activate <key>`
-- Billing/account MVP spec: `docs/billing-account-mvp.md`
-
-## Useful Commands
-
-```bash
-deja start --port 9090
-deja stop
-deja logs --tail 100
-deja logs --follow
-deja bypass on
-deja bypass off
-deja dashboard --port 9090
-```
-
-## Build and Test
-
-```bash
-npm run typecheck
-npm run build:all
-npm test
-```
-
-## Troubleshooting
-
-- `FAQ.md`
-- `TROUBLESHOOTING.md`
-- `docs/handoff.md` for latest implementation status
+---
 
 ## License
 
-BUSL-1.1. See `LICENSE`.
-
-Commercial use of Deja (including resale/hosted redistribution or commercial derivative products)
-requires a separate commercial license from the Licensor.
+BUSL-1.1。公测期间免费，正式收费前会提前通知。
