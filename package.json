@@ -1,6 +1,6 @@
 {
   "name": "deja-context",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "BUSL-1.1",
   "description": "Stop AI coding sessions from bloating - compress, deduplicate, and stabilize LLM context",
   "type": "module",
@@ -10,6 +10,8 @@
   },
   "files": [
     "dist/",
+    "!dist/service/daemon",
+    "!dist/**/*.log",
     "config/",
     "scripts/postinstall-check.cjs",
     "LICENSE",

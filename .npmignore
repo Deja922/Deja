@@ -10,3 +10,8 @@ benchmarks/
 examples/
 *.png
 *.cast
+
+# node-windows service runtime artifacts (regenerated on the user's machine at
+# `deja service install`); never ship the dev box's wrapper exe or its logs
+dist/service/daemon/
+*.log
