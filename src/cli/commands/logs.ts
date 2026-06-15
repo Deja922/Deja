@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, watchFile, statSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { getDataWritePath, getExistingDataReadCandidates } from "../../config/data-paths.js";
 
 interface LogsOptions {
   port: number;
@@ -8,7 +7,25 @@ interface LogsOptions {
   follow: boolean;
 }
 
-const LOG_FILE = join(homedir(), ".deja", "proxy.log");
+// The live writer (proxy) uses the data-paths write target; prefer the most
+// recently written existing candidate so we show the service's log even when
+// it runs under a different account. Falls back to the write target for the
+// "not started yet" message.
+function resolveLogFile(): string {
+  const candidates = getExistingDataReadCandidates("proxy.log");
+  if (candidates.length === 0) return getDataWritePath("proxy.log");
+  let best = candidates[0]!;
+  let bestMtime = -1;
+  for (const c of candidates) {
+    try {
+      const m = statSync(c).mtimeMs;
+      if (m > bestMtime) { bestMtime = m; best = c; }
+    } catch { /* skip */ }
+  }
+  return best;
+}
+
+const LOG_FILE = resolveLogFile();
 
 function colorize(line: string): string {
   try {
@@ -62,7 +79,7 @@ export async function logsCmd(opts: LogsOptions): Promise<void> {
   console.log("");
 
   if (!existsSync(LOG_FILE)) {
-    console.log("  No log file found at ~/.deja/proxy.log");
+    console.log(`  No log file found at ${LOG_FILE}`);
     console.log("  The proxy may not have been started yet.");
     console.log("");
     console.log("  Start it with:  deja start");

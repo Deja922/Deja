@@ -1,13 +1,15 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { dirname } from "path";
+import { getDataWritePath } from "../config/data-paths.js";
 
-const LOG_DIR = join(homedir(), ".deja");
-const LOG_FILE = join(LOG_DIR, "proxy.log");
+// Writer may run as a LocalSystem service; resolve through data-paths so the
+// CLI reader (see logs.ts) converges on the same file. See data-paths.ts.
+const LOG_FILE = getDataWritePath("proxy.log");
 const MAX_LOG_LINES = 10000;
 
 function ensureLogDir(): void {
-  if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
+  const dir = dirname(LOG_FILE);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 export interface ProxyLogEntry {

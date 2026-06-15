@@ -1,16 +1,19 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { dirname } from "path";
+import { getDataWritePath, getExistingDataReadCandidates } from "../config/data-paths.js";
 
 // ── Lightweight, privacy-safe usage telemetry ───────────────────────────────
 //
-// One JSON line per request to ~/.deja/metrics.jsonl. NUMBERS AND ENUMS ONLY —
-// never conversation content, prompts, code, file paths, or model output.
-// Stays entirely on the user's machine; `deja metrics` aggregates it locally so
-// a beta tester can read (and optionally paste) the summary themselves.
+// One JSON line per request. NUMBERS AND ENUMS ONLY — never conversation
+// content, prompts, code, file paths, or model output. Stays entirely on the
+// user's machine; `deja metrics` aggregates it locally so a beta tester can
+// read (and optionally paste) the summary themselves.
+//
+// Writer (proxy, possibly a LocalSystem service) and reader (CLI, the logged-in
+// user) resolve the file through data-paths so they converge on one location;
+// see data-paths.ts for why a bare homedir() splits them.
 
-const LOG_DIR = join(homedir(), ".deja");
-const METRICS_FILE = join(LOG_DIR, "metrics.jsonl");
+const METRICS_FILE = getDataWritePath("metrics.jsonl");
 const MAX_METRIC_LINES = 20000;
 
 /** Where the request came from — used to isolate real Claude Code load from
@@ -56,7 +59,8 @@ export interface MetricEntry {
 }
 
 function ensureLogDir(): void {
-  if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
+  const dir = dirname(METRICS_FILE);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 export function appendMetric(entry: MetricEntry): void {
@@ -109,18 +113,26 @@ export interface MetricsSummary {
 }
 
 export function readMetrics(): MetricEntry[] {
-  try {
-    if (!existsSync(METRICS_FILE)) return [];
-    return readFileSync(METRICS_FILE, "utf-8")
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => {
-        try { return JSON.parse(l) as MetricEntry; } catch { return null; }
-      })
-      .filter((e): e is MetricEntry => e !== null);
-  } catch {
-    return [];
+  // Merge every candidate location (ProgramData + user + systemprofile) so the
+  // CLI sees service-written data regardless of which account wrote it, plus
+  // any legacy data from before the path was unified. Sorted by timestamp.
+  const all: MetricEntry[] = [];
+  for (const file of getExistingDataReadCandidates("metrics.jsonl")) {
+    try {
+      const parsed = readFileSync(file, "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => {
+          try { return JSON.parse(l) as MetricEntry; } catch { return null; }
+        })
+        .filter((e): e is MetricEntry => e !== null);
+      all.push(...parsed);
+    } catch {
+      // skip unreadable candidate
+    }
   }
+  all.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  return all;
 }
 
 export function aggregateMetrics(entries: MetricEntry[]): MetricsSummary {
