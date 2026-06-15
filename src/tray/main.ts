@@ -6,6 +6,10 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
+// GPU 硬件加速在远程桌面/虚拟机下常崩溃导致窗口不渲染，关掉走软件渲染
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+
 type DejaState = "running" | "bypass" | "auto-bypass" | "limit" | "error" | "stopped";
 
 interface HealthData {
@@ -183,6 +187,7 @@ app.whenReady().then(() => {
   });
 
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(HTML)}`);
+  win.once("ready-to-show", () => { win?.show(); win?.focus(); });
 
   ipcMain.on("win-hide", () => win?.hide());
   ipcMain.on("proxy-cmd", (_, apiPath: string) => postToProxy(apiPath));

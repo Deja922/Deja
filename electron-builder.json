@@ -12,8 +12,16 @@
     "main": "dist-tray/main.js"
   },
   "win": {
-    "target": "dir",
+    "target": "nsis",
     "icon": "src/tray/icons/app-icon.png"
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Deja",
+    "runAfterFinish": true
   },
   "mac": {
     "target": [

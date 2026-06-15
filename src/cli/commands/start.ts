@@ -1,6 +1,8 @@
 import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { spawn } from "child_process";
 import http from "http";
 import { startProxy } from "../../proxy/server.js";
@@ -143,6 +145,54 @@ function spawnDaemon(args: string[]): void {
   console.log("");
 }
 
+// ── tray window spawn ────────────────────────────────────────────────────────
+
+/**
+ * Spawn the Electron floating window if available. The proxy and the tray are
+ * two separate processes; before this, only the proxy auto-started and users
+ * never saw the window. We launch it here so `deja start` brings up both.
+ *
+ * Gracefully skips when electron or the built tray entry are absent (e.g. the
+ * published npm package ships neither — electron is a devDep and dist-tray/ is
+ * not in `files`). The tray itself holds a single-instance lock, so a duplicate
+ * spawn quits immediately rather than opening a second window.
+ */
+function spawnTray(): void {
+  if (process.env["DEJA_NO_TRAY"]) return;
+  // Tray is a desktop UI — only Windows and macOS.
+  if (process.platform !== "win32" && process.platform !== "darwin") return;
+
+  // dist/cli/commands/start.js and src/cli/commands/start.ts are both 3 levels
+  // below the repo root, so the same relative path resolves the tray entry in
+  // dev (tsx) and in the built package.
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const trayEntry = join(root, "dist-tray", "main.js");
+  if (!existsSync(trayEntry)) return;
+
+  let electronPath: string;
+  try {
+    const require = createRequire(import.meta.url);
+    // The electron npm package exports the path to its binary when required
+    // outside of an electron runtime.
+    electronPath = require("electron") as unknown as string;
+  } catch {
+    return; // electron not installed (expected for npm end users)
+  }
+  if (typeof electronPath !== "string" || !existsSync(electronPath)) return;
+
+  try {
+    const child = spawn(electronPath, [trayEntry], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.on("error", () => {});
+    child.unref();
+  } catch {
+    // never let a tray failure break proxy startup
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 export async function start(opts: Record<string, unknown>): Promise<void> {
@@ -268,4 +318,8 @@ export async function start(opts: Record<string, unknown>): Promise<void> {
     upstream: opts["upstream"] as string | undefined,
     config,
   });
+
+  // Bring up the floating window alongside the proxy (no-op if electron/tray
+  // are unavailable, e.g. the npm end-user package).
+  spawnTray();
 }
