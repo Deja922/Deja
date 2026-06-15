@@ -30,12 +30,22 @@ export function metricsCmd(opts: { json?: boolean }): void {
   console.log("  ─────────────────────────────────────────────────────");
   console.log("");
   console.log(`  Window:        ${fmt(s.firstTs)} → ${fmt(s.lastTs)}`);
-  console.log(`  Requests:      ${s.totalRequests}`);
+  console.log(`  Claude Code:   ${s.claudeCodeRequests} requests  (stats below cover these only)`);
+  if (s.otherRequests > 0) {
+    console.log(`  Excluded:      ${s.otherRequests} test/manual requests (non-Claude Code)`);
+  }
+  if (s.claudeCodeRequests === 0) {
+    console.log("");
+    console.log("  No real Claude Code traffic recorded yet — only test/manual requests.");
+    console.log("  Restart Claude Code so it routes through Deja, then use it for a while.");
+    console.log("");
+    return;
+  }
   console.log("");
   console.log("  ── Outcomes ──");
-  console.log(`  Compressed:    ${s.compressed} (${pct(s.compressed, s.totalRequests)})`);
-  console.log(`  Skipped:       ${s.skipped} (${pct(s.skipped, s.totalRequests)})  below threshold`);
-  console.log(`  Passthrough:   ${s.passthrough} (${pct(s.passthrough, s.totalRequests)})`);
+  console.log(`  Compressed:    ${s.compressed} (${pct(s.compressed, s.claudeCodeRequests)})`);
+  console.log(`  Skipped:       ${s.skipped} (${pct(s.skipped, s.claudeCodeRequests)})  below threshold`);
+  console.log(`  Passthrough:   ${s.passthrough} (${pct(s.passthrough, s.claudeCodeRequests)})`);
   console.log(`  Auto-bypass:   ${s.bypass} (${s.autoBypassRate}%)  safe-mode passthrough`);
   console.log(`  Errors:        ${s.error}`);
   console.log("");

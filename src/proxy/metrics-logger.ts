@@ -13,11 +13,32 @@ const LOG_DIR = join(homedir(), ".deja");
 const METRICS_FILE = join(LOG_DIR, "metrics.jsonl");
 const MAX_METRIC_LINES = 20000;
 
+/** Where the request came from — used to isolate real Claude Code load from
+ * test/manual traffic (unit tests, curl, probes) that would otherwise skew the
+ * beta numbers. */
+export type MetricSource = "claude-code" | "other";
+
+/**
+ * Classify a request by its client headers. Claude Code (built on the Anthropic
+ * SDK) sends `x-app: cli` and a `claude-cli/...` user-agent; tests, curl, and
+ * health probes send neither. We err toward "other" so a misclassification
+ * under-counts rather than contaminating the real-load stats — and `deja
+ * metrics` always prints the excluded count so that failure is visible.
+ */
+export function classifySource(userAgent?: string, xApp?: string): MetricSource {
+  if (xApp && xApp.toLowerCase() === "cli") return "claude-code";
+  const ua = (userAgent ?? "").toLowerCase();
+  if (ua.includes("claude-cli") || ua.includes("claude-code")) return "claude-code";
+  return "other";
+}
+
 /** Outcome of a single proxied request — no content, only shape/size signals. */
 export interface MetricEntry {
   ts: string;
   /** What the proxy did with this request. */
   outcome: "compressed" | "skipped" | "passthrough" | "bypass" | "error";
+  /** Request client — only "claude-code" counts as real proxy load. */
+  source: MetricSource;
   /** Number of messages in the incoming request (size signal, not content). */
   msgs: number;
   /** Estimated input tokens (full body bytes / 4). */
@@ -64,7 +85,12 @@ function rotateIfNeeded(): void {
 // ── aggregation (read side, used by `deja metrics`) ──────────────────────────
 
 export interface MetricsSummary {
+  /** All recorded requests, every source. */
   totalRequests: number;
+  /** Real Claude Code load — the basis for every stat below. */
+  claudeCodeRequests: number;
+  /** Test / manual / probe traffic excluded from the stats below. */
+  otherRequests: number;
   compressed: number;
   skipped: number;
   passthrough: number;
@@ -99,7 +125,10 @@ export function readMetrics(): MetricEntry[] {
 
 export function aggregateMetrics(entries: MetricEntry[]): MetricsSummary {
   const total = entries.length;
-  const compressed = entries.filter((e) => e.outcome === "compressed");
+  // Only real Claude Code traffic counts. Entries predating the `source` field
+  // (or from tests/curl) are treated as "other" and excluded from the stats.
+  const real = entries.filter((e) => e.source === "claude-code");
+  const compressed = real.filter((e) => e.outcome === "compressed");
   const savings = compressed.map((e) => e.savedPct);
 
   const buckets: Record<string, number> = {
@@ -112,21 +141,23 @@ export function aggregateMetrics(entries: MetricEntry[]): MetricsSummary {
     else buckets["75-100%"]!++;
   }
 
-  const bypassCount = entries.filter((e) => e.outcome === "bypass").length;
+  const bypassCount = real.filter((e) => e.outcome === "bypass").length;
 
   return {
     totalRequests: total,
+    claudeCodeRequests: real.length,
+    otherRequests: total - real.length,
     compressed: compressed.length,
-    skipped: entries.filter((e) => e.outcome === "skipped").length,
-    passthrough: entries.filter((e) => e.outcome === "passthrough").length,
+    skipped: real.filter((e) => e.outcome === "skipped").length,
+    passthrough: real.filter((e) => e.outcome === "passthrough").length,
     bypass: bypassCount,
-    error: entries.filter((e) => e.outcome === "error").length,
+    error: real.filter((e) => e.outcome === "error").length,
     avgSavedPct: savings.length ? round1(savings.reduce((a, b) => a + b, 0) / savings.length) : 0,
     medianSavedPct: median(savings),
-    autoBypassRate: total ? round1((bypassCount / total) * 100) : 0,
+    autoBypassRate: real.length ? round1((bypassCount / real.length) * 100) : 0,
     savingsBuckets: buckets,
-    firstTs: entries[0]?.ts ?? null,
-    lastTs: entries[entries.length - 1]?.ts ?? null,
+    firstTs: real[0]?.ts ?? null,
+    lastTs: real[real.length - 1]?.ts ?? null,
   };
 }
 

@@ -11,7 +11,7 @@ import { resolveEnv, DEFAULT_CONFIG, COMPRESSION_MODES } from "./config-types.js
 import { UpstreamResolver } from "./upstream-resolver.js";
 import { renderDashboard } from "./dashboard.js";
 import { writeProxyLog } from "./proxy-logger.js";
-import { appendMetric } from "./metrics-logger.js";
+import { appendMetric, classifySource } from "./metrics-logger.js";
 import { removeManagedSettings } from "../cli/managed-settings.js";
 import { incrementUsage, getUsageStatus } from "../cli/usage.js";
 import { getLicenseStatus } from "../cli/license.js";
@@ -335,6 +335,13 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         return;
       }
 
+      // Tag the request source so telemetry can isolate real Claude Code load
+      // from test/manual/probe traffic (see classifySource).
+      const reqSource = classifySource(
+        req.headers["user-agent"],
+        typeof req.headers["x-app"] === "string" ? req.headers["x-app"] : undefined,
+      );
+
       // Parse request into internal Context format
       const { context: rawCtx, records } = adapter.requestToContext(body);
       const rawTokens = estimateTokens(rawCtx);
@@ -369,6 +376,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           appendMetric({
             ts: new Date().toISOString(),
             outcome: "bypass",
+            source: reqSource,
             msgs: msgCount,
             inTokens: effectiveTokens,
             outTokens: 0,
@@ -412,6 +420,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         appendMetric({
           ts: new Date().toISOString(),
           outcome: "skipped",
+          source: reqSource,
           msgs: (body["messages"] as unknown[] | undefined)?.length ?? 0,
           inTokens: effectiveTokens,
           outTokens: 0,
@@ -541,6 +550,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       appendMetric({
         ts: new Date().toISOString(),
         outcome: "compressed",
+        source: reqSource,
         msgs: rawCtx.messages.length,
         inTokens: fullBodyTokens,
         outTokens: outputBodyTokens,
